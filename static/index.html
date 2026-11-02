@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSO Planetarium</title>
+<script>try{document.documentElement.dataset.theme=JSON.parse(localStorage.getItem('dso.theme'))||'dark'}catch{document.documentElement.dataset.theme='dark'}</script>
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<header>
+  <div class="brand">✦ DSO Planetarium</div>
+  <label>Lat <input id="lat" type="number" step="0.0001"></label>
+  <label>Lon <input id="lon" type="number" step="0.0001"></label>
+  <button id="geo" title="Use my location">⌖</button>
+  <label>Date
+    <span class="datebox">
+      <button type="button" id="dPrev" title="Previous night">◀</button>
+      <input id="dateTxt" placeholder="dd-mm-yyyy" maxlength="10" style="width:7.2em" title="dd-mm-yyyy">
+      <button type="button" id="dPick" title="Pick from calendar">📅</button>
+      <input id="date" type="date" tabindex="-1" aria-hidden="true">
+      <button type="button" id="dNext" title="Next night">▶</button>
+    </span>
+  </label>
+  <label>Min. altitude <input id="minalt" type="number" value="30" min="0" max="80" style="width:4em">°</label>
+  <span class="sep"></span>
+  <label>Setup <select id="setup"></select></label>
+  <button id="eqBtn" title="Manage telescopes and cameras">⚙ Equipment…</button>
+  <span id="fovInfo" class="pill"></span>
+  <label style="margin-left:auto">Theme
+    <select id="theme" title="Theme (shortcut: T)"><option value="dark">Dark</option><option value="light">Light</option><option value="red">Red (night vision)</option></select>
+  </label>
+</header>
+
+<main>
+  <div id="sky">
+    <div id="fovBoxes"></div>
+    <div id="hud">
+      <div id="hudTime"></div>
+      <div id="hudView"></div>
+    </div>
+    <div id="toolbar">
+      <button data-look="0">N</button><button data-look="90">E</button>
+      <button data-look="180">S</button><button data-look="270">W</button>
+      <button id="zenith" title="Point straight up">Zenith</button>
+      <button id="pole" title="North celestial pole">Pole</button>
+      <label><input type="checkbox" id="planets" checked> Planets</label>
+      <label><input type="checkbox" id="stars" checked> Stars</label>
+      <label title="Names of bright stars (more appear when zoomed in)"><input type="checkbox" id="starNames" checked> Star names</label>
+      <label title="Limiting magnitude (increases automatically when zoomed in)">mag <input id="starMag" type="range" min="2" max="8" step="0.5" value="6" style="width:70px"><span id="starMagV">6</span></label>
+      <label><input type="checkbox" id="const" checked> Constellations</label>
+      <label><input type="checkbox" id="grid" checked> Eq. grid</label>
+      <label><input type="checkbox" id="azgrid"> Alt/Az</label>
+      <label title="Local images from the images/ folder"><input type="checkbox" id="imgs" checked> Images <span id="imgCount"></span></label>
+      <label><input type="checkbox" id="labels" checked> Labels</label>
+    </div>
+    <div id="timebar">
+      <button id="now">Now</button>
+      <button id="play">▶</button>
+      <select id="speed"><option value="60">1 min/s</option><option value="600" selected>10 min/s</option><option value="3600">1 h/s</option></select>
+      <input id="slider" type="range" min="0" max="1440" step="1">
+      <canvas id="nightbar" width="600" height="10"></canvas>
+    </div>
+  </div>
+
+  <aside>
+    <section id="nightInfo"></section>
+    <section id="detail" hidden></section>
+    <section class="filters">
+      <input id="search" placeholder="Search (M31, Rosette, NGC…)">
+      <select id="typeFilter"><option value="">All types</option></select>
+      <label><input type="checkbox" id="onlyVisible" checked> Imageable tonight</label>
+      <label><input type="checkbox" id="fitFov"> Fits in FOV</label>
+    </section>
+    <div class="tablewrap">
+      <table id="list">
+        <thead><tr>
+          <th data-sort="id">Object</th><th data-sort="type">Type</th><th data-sort="maj">Size</th>
+          <th data-sort="fill" title="Object size as % of the sensor's short side">FOV%</th><th data-sort="alt">Alt</th><th data-sort="transit">Transit</th>
+          <th data-sort="hours" title="Hours in astronomical darkness above the minimum altitude">Hrs</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </aside>
+</main>
+
+<dialog id="eqDlg">
+  <form method="dialog" class="dlg">
+    <h2>Equipment</h2>
+    <div class="dlgBody">
+      <div class="setupList">
+        <ul id="setupList"></ul>
+        <div class="row">
+          <button type="button" id="addSetup">+ Add</button>
+          <button type="button" id="dupSetup">Duplicate</button>
+          <button type="button" id="delSetup" class="danger">Delete</button>
+        </div>
+      </div>
+      <div class="setupForm" id="setupForm">
+        <label>Name <input id="f_name" placeholder="e.g. RedCat 51 + ASI2600"></label>
+        <fieldset>
+          <legend>Telescope / lens</legend>
+          <label>Focal length <input id="f_focal" type="number" min="1" step="1"> mm</label>
+          <label>Reducer / Barlow <input id="f_reducer" type="number" min="0.1" step="0.01"> ×</label>
+          <label>Aperture <input id="f_aperture" type="number" min="1" step="1"> mm</label>
+        </fieldset>
+        <fieldset>
+          <legend>Camera</legend>
+          <label>Preset
+            <select id="f_preset">
+              <option value="">— custom —</option>
+              <option value="23.5,15.7,3.76">ZWO ASI2600 (APS-C)</option>
+              <option value="36,24,3.76">ZWO ASI6200 (full frame)</option>
+              <option value="11.3,11.3,3.76">ZWO ASI533</option>
+              <option value="19.1,13,4.63">ZWO ASI294</option>
+              <option value="12.5,10,3.76">ZWO ASI571</option>
+              <option value="11.1,6.3,2.9">ZWO ASI585</option>
+              <option value="5.6,3.2,2.9">ZWO ASI462</option>
+              <option value="13.2,8.8,2.4">ZWO ASI183</option>
+              <option value="22.3,14.9,4.3">Canon APS-C (e.g. 2000D)</option>
+              <option value="23.5,15.6,3.9">Nikon / Sony APS-C</option>
+              <option value="36,24,5.9">Full-frame DSLR / mirrorless</option>
+            </select>
+          </label>
+          <label>Sensor <input id="f_sw" type="number" step="0.1"> × <input id="f_sh" type="number" step="0.1"> mm</label>
+          <label>Pixel size <input id="f_px" type="number" step="0.01"> µm</label>
+          <label>Rotation <input id="f_rot" type="number" step="1"> °</label>
+        </fieldset>
+        <fieldset>
+          <legend>Display</legend>
+          <label>Frame color <input id="f_color" type="color"></label>
+          <label><input id="f_show" type="checkbox"> Always show this FOV frame</label>
+        </fieldset>
+        <div class="computed" id="f_computed"></div>
+      </div>
+    </div>
+    <div class="dlgFoot">
+      <button type="button" id="useSetup">Use this setup</button>
+      <button value="close">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="redFilter"></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
