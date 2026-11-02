@@ -1,3 +1,7 @@
+import { setGroundVisible } from './horizon.js';
+import { deselect } from './panels.js';
+import { setViewMode, view } from './scene.js';
+import { onTab, openSettings } from './dialog.js';
 import { $, COLORS, S, active, fov, fovOf, store, uid } from './core.js';
 import { buildFovBoxes } from './framing.js';
 import { constGroup, starGroup } from './objects.js';
@@ -19,7 +23,8 @@ export const onOptics = () => { updateFovInfo(); renderSetupSelect(); buildFovBo
 
 export function updateFovInfo() {
   const f = fov();
-  $('fovInfo').textContent = `FOV ${fmtAng(f.w)} × ${fmtAng(f.h)} · ${f.scale.toFixed(2)}″/px · ${Math.round(f.F)} mm${f.fr ? ' f/' + f.fr.toFixed(1) : ''}`;
+  $('fovInfo').textContent = `FOV ${fmtAng(f.w)} × ${fmtAng(f.h)} · ${f.scale.toFixed(2)}″/px · ${Math.round(f.F)} mm${f.fr ? ' f/' + f.fr.toFixed(1) : ''} · ${(active().mount ?? 'eq') === 'eq' ? 'EQ mount' : 'Alt-Az mount'}`;
+  $('fovInfo').title = 'Alt-Az mount: the frame stays level with the horizon and rotates against the stars (field rotation).\nEQ mount: the frame keeps its position angle on the sky.';
 }
 export function renderSetupSelect() {
   const sel = $('setup'); sel.innerHTML = '';
@@ -30,7 +35,7 @@ export function renderSetupSelect() {
 // equipment dialog
 export let editing = null;
 export const FIELDS = ['name', 'focal', 'reducer', 'aperture', 'sw', 'sh', 'px', 'mount', 'rot', 'color', 'show'];
-export function openEquipment() { editing = active().id; renderDlg(); $('eqDlg').showModal(); }
+export function openEquipment() { openSettings('equipment'); }
 
 export function renderDlg() {
   const cur = S.setups.find((s) => s.id === editing) || S.setups[0]; editing = cur.id;
@@ -70,7 +75,7 @@ export function init() {
   $('minalt').value = S.minAlt;
   $('minalt').onchange = () => { S.minAlt = +$('minalt').value; store.set('minAlt', S.minAlt); loadVisibility(); };
   $('setup').onchange = () => { S.active = $('setup').value; saveSetups(); onOptics(); };
-  $('eqBtn').onclick = openEquipment;
+  onTab('equipment', () => { editing = active().id; renderDlg(); });
   $('setupList').onclick = (e) => { const li = e.target.closest('li'); if (li) { editing = li.dataset.id; renderDlg(); } };
   for (const k of FIELDS) $('f_' + k).addEventListener('input', () => {
     const st = S.setups.find((s) => s.id === editing), el = $('f_' + k);
@@ -84,6 +89,11 @@ export function init() {
     if (!$('f_preset').value) return;
     const st = S.setups.find((s) => s.id === editing);
     [st.sw, st.sh, st.px] = $('f_preset').value.split(',').map(Number);
+    // all-in-one telescopes (Seestar) also set their optics and alt-az mount
+    const d = $('f_preset').selectedOptions[0].dataset;
+    if (d.focal) { st.focal = +d.focal; st.reducer = 1; }
+    if (d.aperture) st.aperture = +d.aperture;
+    if (d.mount) { st.mount = d.mount; st.rot = 0; }
     saveSetups(); renderDlg(); onOptics();
   };
   $('addSetup').onclick = () => {
@@ -120,9 +130,50 @@ export function init() {
   $('starMag').oninput = () => { $('starMagV').textContent = $('starMag').value; store.set('starMag', +$('starMag').value); };
   $('stars').checked = starGroup.visible = store.get('stars', true);
   $('const').checked = constGroup.visible = store.get('const', true);
-  $('grid').onchange = () => eqGrid.visible = $('grid').checked;
-  $('azgrid').onchange = () => azGrid.visible = $('azgrid').checked;
-  azGrid.visible = false;
+  // inverted colours (white sky, black objects) – a GPU filter on the sky canvas and its labels only
+const setInvert = (on) => { $('invert').checked = on; $('sky').classList.toggle('inverted', on); store.set('invert', on); };
+setInvert(store.get('invert', false));
+$('invert').onchange = () => setInvert($('invert').checked);
+addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) setInvert(!$('invert').checked);
+});
+// view mode (Alt/Az or Equatorial) decides the projection and which coordinate grid is drawn
+  const applyGrid = () => { const on = $('grid').checked; eqGrid.visible = on && view.mode === 'eq'; azGrid.visible = on && view.mode === 'altaz'; };
+  $('viewMode').value = store.get('viewMode', 'altaz');
+  setViewMode($('viewMode').value);
+  $('viewMode').onchange = () => { setViewMode($('viewMode').value); store.set('viewMode', view.mode); applyGrid(); };
+  $('grid').checked = store.get('grid', true);
+  $('grid').onchange = () => { store.set('grid', $('grid').checked); applyGrid(); };
+  applyGrid();
+  // remember the remaining toggles and filters (restored before the first render)
+  for (const id of ['labels', 'imgs', 'onlyVisible', 'fitFov']) {
+    const el = $(id); el.checked = store.get('chk.' + id, el.checked);
+    el.addEventListener('change', () => store.set('chk.' + id, el.checked));
+  }
+  $('speed').value = String(store.get('speed', +$('speed').value));
+  $('speed').addEventListener('change', () => store.set('speed', +$('speed').value));
+  $('tgtBox').open = store.get('targetsOpen', true);
+  $('tgtBox').addEventListener('toggle', () => store.set('targetsOpen', $('tgtBox').open));
+  for (const id of ['typeFilter', 'catFilter']) $(id).addEventListener('change', () => store.set(id, $(id).value));
+  // header / time-bar selects give the focus back after a choice – otherwise the arrow keys would keep changing
+  // the select (e.g. Alt/Az ↔ Eq) instead of panning the sky
+  for (const id of ['viewMode', 'setup', 'theme', 'speed']) $(id).addEventListener('change', (e) => e.target.blur());
+  // framing & mosaic panel: hidden until the user asks for it
+  const setFraming = (on) => { $('framing').hidden = !on; $('frToggle').classList.toggle('on', on); store.set('framingPanel', on); };
+  setFraming(store.get('framingPanel', false));
+  $('frToggle').onclick = () => setFraming($('framing').hidden);
+  addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)
+      && !document.querySelector('dialog[open]')) setFraming($('framing').hidden);
+  });
+  // ground / horizon on-off
+  $('horizonOn').checked = store.get('ground', true); setGroundVisible($('horizonOn').checked);
+  $('horizonOn').onchange = () => { store.set('ground', $('horizonOn').checked); setGroundVisible($('horizonOn').checked); };
+  // Esc: clear the selection and let the FOV frame follow the view again
+  addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    if (S.selected) deselect(); else if (S.frame) { S.frame = null; buildFovBoxes(); }
+  });
   $('theme').onchange = () => setTheme($('theme').value);
   addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() !== 't' || e.ctrlKey || e.metaKey || e.altKey || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;

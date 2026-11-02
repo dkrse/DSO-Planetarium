@@ -8,48 +8,47 @@ they stay high in true darkness, and how they fit the field of view of your tele
 
 ## Screenshots
 
-![Wide view of the western sky with deep-sky objects, DSS images and the planets table](screenshots/05.png)
-*Dark theme: deep-sky objects with true sizes and DSS images, star names, constellations, Uranus selected with its planet detail.*
+<p>
+  <img src="screenshots/10.png" alt="Equatorial view" width="49%">
+  <img src="screenshots/11.png" alt="Alt/Az view" width="49%">
+</p>
 
-![Planning view with M31 selected](screenshots/06.png)
-*Object table, night summary and M31 with its nightly altitude chart.*
+*View modes on the same part of the sky: **Equatorial** (left — celestial north up, RA/Dec grid, the sky stays fixed while
+time runs) and **Alt/Az** (right — zenith up, Alt/Az grid). OpenNGC, Sharpless and Barnard catalogs, the "Sun, Moon &
+planets" table and the view controls in the header.*
 
-![Rosette Nebula with DSS image and FOV frame](screenshots/01.png)
-*Light theme: Rosette Nebula with a local DSS2 image and the FOV frame of a 1600 mm RC + ASI533.*
+![Inverted chart with Barnard dark nebulae and a Seestar S50 Pro frame](screenshots/12.png)
+*Light theme with inverted sky colours (white background, black stars) — Barnard dark nebulae around NGC 1333 in
+Perseus and the field of a Seestar S50 Pro on its alt-az mount, rotated against the stars in the equatorial view.*
 
 ![4×2 mosaic on M31](screenshots/09.jpg)
 *Mosaic: a 4×2 mosaic over M31 at PA 290°, drawn on the sky over the DSS image; panels are numbered and the frame can be dragged and rotated.*
-
-![Wide daytime view with the framing panel](screenshots/08.png)
-*Framing panel (bottom left): frame centre and PA, mosaic size and overlap, anchor / follow view, copy coordinates, save target; the Targets list is in the side panel.*
-
-![Jupiter and Mars in Leo](screenshots/03.png)
-*Planets: Jupiter centred in the FOV frame, disc size on the sensor, rise/transit/set for all planets.*
-
-![Red night-vision theme](screenshots/04.png)
-*Red theme for use at the telescope — the whole UI and the sky are rendered in red only.*
-
-<p>
-  <img src="screenshots/07.png" alt="Equipment dialog, dark theme" width="49%">
-  <img src="screenshots/02.png" alt="Equipment dialog, light theme" width="49%">
-</p>
-
-*Equipment dialog: setups with focal length, reducer, camera preset, and computed FOV, f-ratio and image scale.*
 
 ## Features
 
 **3D sky**
 - Observer-centred celestial sphere with horizon, cardinal points, zenith and celestial-pole markers
 - Everything is shown at its position of date (precession applied to the J2000 data); coordinates are displayed in J2000
-- Equatorial grid, optional Alt/Az grid, constellation lines
+- Two view modes: Alt/Az (zenith up) and Equatorial (celestial north up, sky fixed while time runs); grid of the current mode
+- Horizon can be hidden to see objects below it
+- **Esc** clears the selection; the FOV frame then follows the view again
+- Constellation lines
 - ~41 000 stars down to mag 8 with B−V colours; limiting magnitude slider that deepens as you zoom
 - Names of bright stars (proper names; Bayer designations when zoomed in)
 - Sun, Moon (with illumination) and planets Mercury–Neptune with true angular sizes
 - Drag to look around, mouse wheel to zoom from 110° down to 0.15°
 
 **Deep-sky objects**
-- Catalog of 1 036 objects from [OpenNGC](https://github.com/mattiaverga/OpenNGC): all Messier objects, everything brighter
-  than 11 mag, larger than 8′ or with a common name — with accurate sizes and position angles; plus a few Sh2/LDN targets
+- Manageable catalogs (⚙ Settings › Catalogs): show / hide, import your own (CSV / JSON), delete. Built in:
+  - [OpenNGC](https://github.com/mattiaverga/OpenNGC) — 1 027 NGC/IC objects incl. all Messier objects (≤ 11 mag, ≥ 8′ or named),
+    with accurate sizes and position angles
+  - OpenNGC faint — 2 143 more NGC/IC objects between 11 and 13 mag, mostly galaxies (for stacked imaging, e.g. Seestar)
+  - Sharpless (Sh2) — 313 emission nebulae; Barnard (B) — 349 dark nebulae
+  - a few extra hand-picked targets
+- The same object listed under different ids in several catalogs (Sh2-117 = NGC 7000) is shown once;
+  the other ids become searchable aliases
+- Object types can be shown / hidden (⚙ Settings › Objects); the table can be filtered by type and catalog
+- Density control: at wide views only objects large on screen or bright enough are drawn, more appear as you zoom in
 - Each object drawn as an ellipse with its real angular size and position angle, colour-coded by type
 - Local sky images (DSS2 colour) overlaid at the correct scale and orientation
 - Labels placed to the right of each object, like Stellarium/KStars
@@ -61,26 +60,41 @@ they stay high in true darkness, and how they fit the field of view of your tele
   object size as % of the sensor; sort, search, type filter, "imageable tonight", "fits in FOV"
 - Object detail: rise/transit/set, time above minimum altitude, dark window, moonless hours,
   distance from the Moon, nightly altitude chart (imageable window, Moon, meridian, horizon profile, airmass axis)
-- Custom horizon profile (trees, buildings): drawn on the sky, used for imageable hours;
+- Custom horizon profile (⚙ Settings › Horizon; trees, buildings): drawn on the sky, used for imageable hours;
   import from Stellarium `.txt`, NINA `.hrz` or CSV
-- Planets table with magnitude, size, rise/transit/set and max altitude in darkness
-- Center / track / zoom-to-FOV for any object or planet
+- "Sun, Moon & planets" table with magnitude, size, rise/transit/set and max altitude in darkness
+- Search finds deep-sky objects (also by alias), the Sun, the Moon and planets
+- Center / track / zoom-to-FOV for any object, planet, the Sun or the Moon
 
 **Equipment**
-- Equipment dialog with any number of telescope + camera setups: focal length, reducer/Barlow, aperture,
-  sensor size (camera presets), pixel size, rotation, frame colour
+- Equipment (⚙ Settings › Equipment) with any number of telescope + camera setups: focal length, reducer/Barlow, aperture,
+  sensor size (camera presets incl. Seestar S50 / S50 Pro), pixel size, mount, rotation, frame colour
 - Computed effective focal length, f-ratio, FOV, image scale (″/px) and resolution
 - Active setup shown as a FOV frame drawn on the sky; other setups can be shown simultaneously as dashed frames
-- Equatorial or Alt-Az mount per setup — on an equatorial mount the frame keeps its position angle and turns with the sky
+- Equatorial or Alt-Az mount per setup — on an equatorial mount the frame keeps its position angle and turns with the sky;
+  on an alt-az mount (e.g. Seestar) it stays level with the horizon and rotates against the stars (field rotation)
 - Drag the frame to compose the shot, drag the ⟳ handle to rotate the camera (position angle N→E)
 - Mosaics: columns × rows with overlap; copy panel centres (RA/Dec/PA) for NINA / Ekos / ASIAIR
 - Saved targets: store a framed object (centre, PA, setup, mosaic) and reload it later; available via the API
 
+**Performance**
+- The sky is redrawn only when something changes — an idle window uses almost no CPU / GPU
+- Lightweight label layer, culling of objects outside the view, matrix updates only for visible objects, paged object
+  table, NumPy-vectorised server computations with gzip — about 4 ms CPU per frame with ~3 800 objects
+- Settings › Performance: hardware-GPU or software (CPU) mode, GPU preference, resolution, antialiasing, frame-rate cap
+
 **UI**
+- Uncluttered sky: view controls (N / E / S / W, Zenith, Pole, ▭ Framing, Alt/Az ↔ Eq) are in the header;
+  display toggles are in ⚙ Settings › Display
+- The framing & mosaic panel appears only when turned on (▭ Framing, shortcut **F**)
+- Shortcuts: **← ↑ → ↓** pan the sky (**Shift** = fine) · **+ / −** zoom · **T** theme · **I** invert colours ·
+  **F** framing panel · **Esc** clear selection
 - Dark, Light and Red (night-vision) themes — press **T** to cycle
+- Inverted sky colours (white background, black stars) like a printed chart — press **I**
 - Date as dd-mm-yyyy with calendar and previous/next-night buttons
-- Setups and targets are stored on the server (SQLite), so any client — or an external controller — can use them via the API;
-  view preferences (theme, location, toggles) stay in the browser
+- Setups and targets are stored on the server (SQLite), so any client — or an external controller — can use them via the API
+- Every setting is remembered: view preferences (theme, toggles, filters, performance, …) are saved in the browser and
+  on the server, so they are restored on the next start — also in another browser
 
 ## Quick start
 
@@ -110,12 +124,12 @@ Optional sidecar `images/M31.json` for your own photos:
 
 Fill the folder with DSS2 images from NASA SkyView (Red + Blue composed into colour locally):
 ```bash
-.venv/bin/python tools/download_images.py                      # whole catalog
+.venv/bin/python tools/download_images.py --catalog openngc     # one catalog
 .venv/bin/python tools/download_images.py --only M31 M42 --px 1024 --force
 ```
 Existing files — including your own photos — are never overwritten without `--force`.
 The bundled set covers the original ~160 targets; running the script without `--only` downloads images
-for the whole 1 036-object catalog (roughly 200 MB, it takes a while).
+for every catalog (≈ 3 800 objects, several hundred MB) — usually limit it with `--catalog openngc` or `--only`.
 
 ## Project layout
 
@@ -123,14 +137,15 @@ for the whole 1 036-object catalog (roughly 200 MB, it takes a while).
 app/
   main.py        FastAPI app and API endpoints
   astro.py       Sun/Moon/sidereal time, precession, rise-transit-set, darkness window, horizon (no dependencies)
-  catalog.py     deep-sky catalog loader (+ fallback entries)
-  data/          catalog.json built from OpenNGC
+  catalog.py     catalog management: loading, merging by priority, import, delete
+  data/catalogs/ one JSON file per catalog (OpenNGC, Sharpless, Barnard, extras, your imports)
   images.py      local image index
   store.py       SQLite storage for setups, targets and settings
   framing.py     FOV / mosaic geometry (panel centres)
 static/
   index.html, style.css           page and styles
   js/            ES modules of the UI:
+    boot.js        loads the saved UI preferences from the server, then starts main.js
     main.js        entry point, initialises the modules in order
     core.js        shared state, helpers, equipment model
     scene.js       Three.js scene, sky orientation, camera and mouse controls
@@ -139,15 +154,21 @@ static/
     loop.js        render loop, label decluttering, HUD
     panels.js      night summary, object table, details, altitude chart
     time.js        date / time controls
-    settings.js    equipment dialog, toggles, theme
+    settings.js    Settings › Equipment, toggles, theme
     sync.js        server sync of setups
     targets.js     saved targets
-    horizon.js     custom horizon profile (dialog, silhouette, parser)
+    horizon.js     Settings › Horizon (profile, silhouette, parser)
+    dialog.js      Settings dialog with tabs
+    objtypes.js    Settings › Objects (visible types, density)
+    catalogs.js    Settings › Catalogs (show / hide, import, delete)
+    perf.js        Settings › Performance (GPU, quality, frame rate)
+    labels.js      lightweight HTML label layer (replaces CSS2DRenderer)
   astro.js       client-side astronomy incl. planets (JPL Keplerian elements) and precession
   data/          stars, star names, constellation lines
   vendor/        third-party libraries (three.js)
 tools/
-  build_catalog.py     builds app/data/catalog.json from OpenNGC
+  build_catalog.py     builds app/data/catalogs/openngc.json from OpenNGC
+  build_vizier.py      builds the Sharpless and Barnard catalogs from CDS VizieR
   download_images.py   fills images/ from NASA SkyView
 tests/           pytest suite (accuracy vs astropy, JS parity, API)
 images/          object images
@@ -158,7 +179,10 @@ data/            SQLite database (created on first run, not in git)
 
 | endpoint | description |
 |---|---|
-| `GET /api/catalog` | object catalog and type names |
+| `GET /api/catalog` | objects of visible catalogs and types (with `cat`, `aka`), type names and counts, catalog list |
+| `GET /api/catalogs` | catalogs with counts, priority, source, license, hidden flag |
+| `POST /api/catalogs` | import a catalog (multipart: `file` CSV/JSON, `id`, `name`, `priority`, …; `replace=true` to overwrite) |
+| `DELETE /api/catalogs/{id}` | delete a catalog file |
 | `GET /api/night?lat&lon&start` | Sun twilight times, Moon rise/set/illumination, dark hours |
 | `GET /api/visibility?lat&lon&start&min_alt&twilight` | night summary + per-object visibility |
 | `GET /api/images` | objects with a local image and its fov/rotation/centre |
@@ -166,7 +190,7 @@ data/            SQLite database (created on first run, not in git)
 | `GET POST /api/setups`, `GET PUT DELETE /api/setups/{id}` | equipment setups (stored on the server) |
 | `GET POST /api/targets`, `GET PUT DELETE /api/targets/{id}` | planned targets: frame centre, PA, setup, mosaic, notes |
 | `GET /api/targets/{id}/panels` | mosaic panel centres (RA/Dec J2000, PA) — ready for a capture or mount controller |
-| `GET PATCH /api/settings` | server-side settings (`active_setup`, `horizon` = list of `[azimuth, altitude]`) |
+| `GET PATCH /api/settings` | server-side settings (`active_setup`, `horizon` = list of `[azimuth, altitude]`, `hidden_catalogs`, `hidden_types`, `ui` = browser UI preferences) |
 
 Interactive API documentation (OpenAPI) is available at <http://127.0.0.1:8000/docs>.
 Setups and targets are stored in `data/astro.db` (SQLite); back up that file to keep your plans.
@@ -200,7 +224,9 @@ implementations agree, and exercises the REST API. JavaScript tests need Node.js
 ## Data credits
 
 - Deep-sky catalog: [OpenNGC](https://github.com/mattiaverga/OpenNGC) by Mattia Verga, CC BY-SA 4.0 —
-  `app/data/catalog.json` is an adaptation and is distributed under the same license (see `app/data/README.md`)
+  `app/data/catalogs/openngc.json` is an adaptation and is distributed under the same license (see `app/data/README.md`)
+- Sharpless (1959) and Barnard (1927) catalogs via CDS VizieR (VII/20, VII/220A). *This research has made use of the
+  VizieR catalogue access tool, CDS, Strasbourg, France.*
 
 - Stars, star names and constellation lines: [d3-celestial](https://github.com/ofrohn/d3-celestial) © 2015 Olaf Frohn,
   BSD 3-Clause License — see [`static/data/LICENSE-d3-celestial.txt`](static/data/LICENSE-d3-celestial.txt); derived from Hipparcos/Tycho (ESA)
@@ -213,5 +239,5 @@ implementations agree, and exercises the REST API. JavaScript tests need Node.js
 
 [MIT](LICENSE) © 2026 krse
 
-The MIT license covers the source code of this project; `app/data/catalog.json` is CC BY-SA 4.0. Bundled third-party data keep their own licenses
+The MIT license covers the source code of this project; `app/data/catalogs/openngc*.json` are CC BY-SA 4.0. Bundled third-party data keep their own licenses
 (see *Data credits* above and [`static/data/README.md`](static/data/README.md)).

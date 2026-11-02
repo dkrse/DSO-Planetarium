@@ -1,19 +1,27 @@
+import { invalidate } from './loop.js';
 import * as THREE from 'three';
-import { D2R, PLANET_INFO, planets } from '../astro.js';
+import { D2R, PLANET_INFO, bodies } from '../astro.js';
 import { $, R, S } from './core.js';
 import { select } from './panels.js';
-import { disc, eqGroup, eqVec, label, padLabel, rightOf } from './scene.js';
+import { disc, eqGroup, freeze, updateVisibleChildren, eqVec, label, moon, moonL, padLabel, rightOf, sun, sunL } from './scene.js';
 
 // ---------------------------------------------------------------- planets
 export let planetNodes;
 export const gotoPlanet = (name) => select('P:' + name, true);
-// selection can be a DSO id ("M31") or a planet ("P:Jupiter")
-export const planetOf = (id) => id?.startsWith('P:') ? planetNodes.find((x) => x.name === id.slice(2)) : null;
+// selection can be a DSO id ("M31") or a solar-system body ("P:Jupiter", "P:Sun", "P:Moon")
+export const BODY_NAMES = ['Sun', 'Moon', ...Object.keys(PLANET_INFO)];
+export function planetOf(id) {
+  if (!id?.startsWith('P:')) return null;
+  const name = id.slice(2);
+  if (name === 'Sun') return { name, spr: sun, lbl: sunL };
+  if (name === 'Moon') return { name, spr: moon, lbl: moonL };
+  return planetNodes.find((x) => x.name === name) ?? null;
+}
 export const sel3D = (id) => planetOf(id)?.spr ?? nodes.get(id)?.holder;
 export const selLabel = (id) => (planetOf(id) ?? nodes.get(id))?.lbl;
 export function selRaDec(id, j) {
   const pn = planetOf(id);
-  if (pn) { const p = planets(j).find((x) => x.name === pn.name); return [p.ra, p.dec]; }
+  if (pn) { const p = bodies(j).find((x) => x.name === pn.name); return [p.ra, p.dec]; }
   const o = nodes.get(id).o; return [o.ra, o.dec];
 }
 
@@ -26,7 +34,19 @@ export function ellipse(a, b, segs = 64) {
   return new THREE.BufferGeometry().setFromPoints(p);
 }
 
+/** Remove all deep-sky objects from the scene (before rebuilding with another set of catalogs). */
+export function clearObjects() {
+  for (const n of nodes.values()) {
+    eqGroup.remove(n.holder); n.lbl.element.remove();
+    n.outline.geometry.dispose(); n.outline.material.dispose();
+    if (n.img) { eqGroup.remove(n.img); n.img.traverse((x) => { x.geometry?.dispose(); x.material?.map?.dispose(); x.material?.dispose(); }); }
+  }
+  nodes.clear();
+}
+
 export function buildObjects() {
+  // orient the object holders in the J2000 frame: lookAt() needs eqGroup to be identity for a moment
+  const saved = eqGroup.matrix.clone(); eqGroup.matrix.identity(); eqGroup.updateMatrixWorld(true);
   for (const o of S.catalog) {
     const holder = new THREE.Object3D();
     holder.position.copy(eqVec(o.ra, o.dec));
@@ -38,9 +58,11 @@ export function buildObjects() {
     pa.add(outline);
     const lbl = rightOf(label(o.id + (o.name ? ' ' + o.name : ''), 'lbl', () => select(o.id, true)));
     lbl.position.set(0, 0, 0); holder.add(lbl);
-    eqGroup.add(holder);
-    nodes.set(o.id, { o, holder, outline, lbl, a, img: null, imgState: 0 });
+    eqGroup.add(holder); freeze(holder);
+    nodes.set(o.id, { o, holder, outline, lbl, a, img: null, imgState: 0, messier: /^M\d+$/.test(o.id) });
   }
+  eqGroup.matrix.copy(saved); eqGroup.matrixWorldNeedsUpdate = true;
+  invalidate();
 }
 
 // local images from images/ (loaded lazily when zoomed in)
@@ -62,8 +84,8 @@ export function loadImage(n) {
     hold.lookAt(0, 0, 0);
     eqGroup.matrix.copy(saved); eqGroup.matrixWorldNeedsUpdate = true;
     mesh.rotation.z = m.rot * D2R; hold.add(mesh);
-    hold.visible = $('imgs').checked; eqGroup.add(hold);
-    n.img = hold; n.imgState = 2;
+    hold.visible = $('imgs').checked; eqGroup.add(hold); freeze(hold);
+    n.img = hold; n.imgState = 2; invalidate();
   }, undefined, () => { loading--; n.imgState = 3; });
 }
 export async function loadImageIndex() {
@@ -124,6 +146,8 @@ export async function loadStars() {
     }
     constGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), m));
   }
+  freeze(starGroup); freeze(constGroup);
+  updateVisibleChildren(starGroup);               // 900 star-name labels: only the shown ones are updated
 }
 
 // module setup – called once from main.js after all modules are loaded

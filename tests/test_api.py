@@ -58,3 +58,10 @@ def test_settings(client):
     s = client.post("/api/setups", json=SETUP).json()
     assert client.patch("/api/settings", json={"active_setup": s["id"]}).json()["active_setup"] == s["id"]
     assert client.patch("/api/settings", json={"bogus": 1}).status_code == 422
+
+
+def test_ui_settings(client):
+    ui = {"theme": "light", "invert": True, "viewMode": "eq", "perf": {"fps": 30}}
+    assert client.patch("/api/settings", json={"ui": ui}).json()["ui"] == ui
+    assert client.get("/api/settings").json()["ui"]["viewMode"] == "eq"
+    assert client.patch("/api/settings", json={"ui": "nope"}).status_code == 422

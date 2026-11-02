@@ -128,3 +128,19 @@ export function planets(j) {
       mag: 5 * Math.log10(r * dist) + phaseMag(name, phase), diam: info.d / dist, phase };
   });
 }
+
+// ---------------------------------------------------------------- Sun, Moon and planets in one list
+export const BODY_INFO = { Sun: { color: '#fff3c0' }, Moon: { color: '#e8eef8' }, ...PLANET_INFO };
+
+/** Sun, Moon and planets: [{name, ra, dec (J2000), mag, diam ″, phase °, dist AU, r AU}] */
+export function bodies(j) {
+  const T = (j - 2451545) / 36525, E = helio('Earth', T), au = Math.hypot(...E);
+  const [sra, sdec] = precess(...sunRaDec(j), j, true);
+  const [mra, mdec] = precess(...moonRaDec(j), j, true);
+  const ill = moonIllum(j), i = Math.acos(Math.max(-1, Math.min(1, 2 * ill - 1))) / D2R;   // lunar phase angle
+  return [
+    { name: 'Sun', ra: sra, dec: sdec, mag: -26.74, diam: 1919.26 / au, phase: 0, dist: au, r: 0 },
+    { name: 'Moon', ra: mra, dec: mdec, mag: -12.73 + 0.026 * i + 4e-9 * i ** 4, diam: 1865, phase: i, dist: 0.00257, r: au, illum: ill },
+    ...planets(j),
+  ];
+}

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { freeze } from './scene.js';
 import { D2R, fmtDec, fmtRA } from '../astro.js';
 import { $, R, S, active, fovOf, store } from './core.js';
 import { aimAt, camera, eqGroup, eqVec, label, overlay, scene, sky, startDrag } from './scene.js';
@@ -108,6 +109,10 @@ export function rebuildFrame(center) {
       frameGroup.add(hnd);
     }
   }
+  freeze(frameGroup);
+  // rebuilt after this frame's matrix update → compute world matrices now, otherwise the new lines would be
+  // drawn with identity matrices (off screen) until the next frame – while panning that is every frame
+  frameGroup.updateMatrixWorld(true);
   renderFraming();
 }
 

@@ -34,6 +34,7 @@ export async function loadSetups() {
     list = (await api('GET', '/api/setups')).map(clean); settings = { active_setup: active().id };
   }
   setHorizon(settings.horizon ?? []);
+  S.hiddenTypes = settings.hidden_types ?? [];
   S.setups = list;
   S.active = list.some((x) => x.id === settings.active_setup) ? settings.active_setup : list[0].id;
   synced = new Map(list.map((st) => [st.id, JSON.stringify(st)])); syncedActive = S.active;

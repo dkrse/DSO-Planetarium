@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DSO Planetarium</title>
+<title>DSO</title>
 <script>try{document.documentElement.dataset.theme=JSON.parse(localStorage.getItem('dso.theme'))||'dark'}catch{document.documentElement.dataset.theme='dark'}</script>
 <link rel="stylesheet" href="/static/style.css">
 <script>
@@ -27,9 +27,18 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
 </head>
 <body>
 <header>
-  <div class="brand">✦ DSO Planetarium</div>
-  <label>Lat <input id="lat" type="number" step="0.0001"></label>
-  <label>Lon <input id="lon" type="number" step="0.0001"></label>
+  <div class="brand">✦ DSO</div>
+  <nav id="navbar" aria-label="View">
+      <button data-look="0">N</button><button data-look="90">E</button>
+      <button data-look="180">S</button><button data-look="270">W</button>
+      <button id="zenith" title="Point straight up">Zenith</button>
+      <button id="pole" title="North celestial pole">Pole</button>
+      <button id="frToggle" title="Show / hide the framing &amp; mosaic panel (shortcut: F)">▭ Framing</button>
+    <label title="Alt/Az: zenith up, horizon level. Equatorial: celestial north up, the sky stays fixed while time runs (like a tracking EQ mount)."><select id="viewMode"><option value="altaz">Alt/Az</option><option value="eq">Eq</option></select></label>
+  </nav>
+  <span class="sep"></span>
+  <label>Lat <input id="lat" type="number" step="any"></label>
+  <label>Lon <input id="lon" type="number" step="any"></label>
   <button id="geo" title="Use my location">⌖</button>
   <label>Date
     <span class="datebox">
@@ -41,10 +50,9 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
     </span>
   </label>
   <label>Min. altitude <input id="minalt" type="number" value="30" min="0" max="80" style="width:4em">°</label>
-  <button id="hzBtn" title="Custom horizon profile (trees, buildings)">⛰ Horizon…</button>
   <span class="sep"></span>
   <label>Setup <select id="setup"></select></label>
-  <button id="eqBtn" title="Manage telescopes and cameras">⚙ Equipment…</button>
+  <button id="setBtn" title="Settings: objects, catalogs, horizon, equipment">⚙ Settings…</button>
   <span id="syncState" class="warn"></span>
   <span id="fovInfo" class="pill"></span>
   <label style="margin-left:auto">Theme
@@ -54,7 +62,7 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
 
 <main>
   <div id="sky">
-    <div id="framing">
+    <div id="framing" hidden>
       <div id="frInfo"></div>
       <div class="frRow">
         <label title="Mosaic columns × rows">Mosaic <input id="moCols" type="number" min="1" max="10" step="1"> × <input id="moRows" type="number" min="1" max="10" step="1"></label>
@@ -68,21 +76,6 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
     <div id="hud">
       <div id="hudTime"></div>
       <div id="hudView"></div>
-    </div>
-    <div id="toolbar">
-      <button data-look="0">N</button><button data-look="90">E</button>
-      <button data-look="180">S</button><button data-look="270">W</button>
-      <button id="zenith" title="Point straight up">Zenith</button>
-      <button id="pole" title="North celestial pole">Pole</button>
-      <label><input type="checkbox" id="planets" checked> Planets</label>
-      <label><input type="checkbox" id="stars" checked> Stars</label>
-      <label title="Names of bright stars (more appear when zoomed in)"><input type="checkbox" id="starNames" checked> Star names</label>
-      <label title="Limiting magnitude (increases automatically when zoomed in)">mag <input id="starMag" type="range" min="2" max="8" step="0.5" value="6" style="width:70px"><span id="starMagV">6</span></label>
-      <label><input type="checkbox" id="const" checked> Constellations</label>
-      <label><input type="checkbox" id="grid" checked> Eq. grid</label>
-      <label><input type="checkbox" id="azgrid"> Alt/Az</label>
-      <label title="Local images from the images/ folder"><input type="checkbox" id="imgs" checked> Images <span id="imgCount"></span></label>
-      <label><input type="checkbox" id="labels" checked> Labels</label>
     </div>
     <div id="timebar">
       <button id="now">Now</button>
@@ -98,10 +91,12 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
     <section id="detail" hidden></section>
     <section class="targets"><details id="tgtBox" open><summary>Targets <span id="tgtCount"></span></summary><ul id="tgtList"></ul></details></section>
     <section class="filters">
-      <input id="search" placeholder="Search (M31, Rosette, NGC…)">
+      <input id="search" placeholder="Search (M31, Rosette, NGC…, Moon, Jupiter)">
       <select id="typeFilter"><option value="">All types</option></select>
+      <select id="catFilter"><option value="">All catalogs</option></select>
       <label><input type="checkbox" id="onlyVisible" checked> Imageable tonight</label>
       <label><input type="checkbox" id="fitFov"> Fits in FOV</label>
+      <button type="button" id="hiddenNote" class="note" hidden></button>
     </section>
     <div class="tablewrap">
       <table id="list">
@@ -116,9 +111,94 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
   </aside>
 </main>
 
-<dialog id="eqDlg">
-  <form method="dialog" class="dlg">
-    <h2>Equipment</h2>
+<div id="redFilter"></div>
+<dialog id="setDlg">
+  <form method="dialog" class="dlg" novalidate>
+    <div class="tabsHead">
+      <h2>Settings</h2>
+      <nav class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="display">Display</button>
+        <button type="button" role="tab" data-tab="objects">Objects</button>
+        <button type="button" role="tab" data-tab="catalogs">Catalogs</button>
+        <button type="button" role="tab" data-tab="horizon">Horizon</button>
+        <button type="button" role="tab" data-tab="equipment">Equipment</button>
+        <button type="button" role="tab" data-tab="performance">Performance</button>
+      </nav>
+    </div>
+    <section class="tabPanel" data-panel="display">
+      <div class="objBody">
+        <fieldset>
+          <legend>View</legend>
+          <label title="Coordinate grid of the current view (Alt/Az or RA/Dec)"><input type="checkbox" id="grid" checked> Grid</label>
+          <label title="Ground, horizon line and horizon profile; when hidden, objects below the horizon are shown too"><input type="checkbox" id="horizonOn" checked> Horizon</label>
+          <label title="Inverted colours: white sky, black stars (shortcut: I)"><input type="checkbox" id="invert"> Invert</label>
+        </fieldset>
+        <fieldset>
+          <legend>Sky</legend>
+          <label><input type="checkbox" id="stars" checked> Stars</label>
+          <label title="Limiting magnitude (increases automatically when zoomed in)">mag <input id="starMag" type="range" min="2" max="8" step="0.5" value="6" style="width:70px"><span id="starMagV">6</span></label>
+          <label title="Names of bright stars (more appear when zoomed in)"><input type="checkbox" id="starNames" checked> Star names</label>
+          <label><input type="checkbox" id="const" checked> Constellations</label>
+          <label><input type="checkbox" id="planets" checked> Planets</label>
+        </fieldset>
+        <fieldset>
+          <legend>Deep-sky objects</legend>
+          <label><input type="checkbox" id="labels" checked> Labels</label>
+          <label title="Local images from the images/ folder"><input type="checkbox" id="imgs" checked> Images <span id="imgCount"></span></label>
+        </fieldset>
+        <p class="hint">Shortcuts: <b>← ↑ → ↓</b> pan (with <b>Shift</b> fine) · <b>+ / −</b> zoom · <b>T</b> theme · <b>I</b> invert colours · <b>F</b> framing panel · <b>Esc</b> clear selection</p>
+      </div>
+    </section>
+    <section class="tabPanel" data-panel="objects">
+      <div class="objBody">
+        <fieldset>
+          <legend>Object types shown on the sky and in the tables</legend>
+          <div id="typeList" class="typeGrid"></div>
+          <div class="row"><button type="button" id="typesAll">All</button><button type="button" id="typesNone">None</button>
+            <span class="hint">Hidden types are also left out of the server API (visibility, catalog).</span></div>
+        </fieldset>
+        <fieldset>
+          <legend>Density</legend>
+          <label><input type="checkbox" id="lod"> Hide small and faint objects when zoomed out</label>
+          <p class="hint">Like Stellarium: when the view is wide, only objects that are large on screen or bright enough are drawn;
+            more appear as you zoom in. Messier objects, the selected object and saved targets are always shown.</p>
+        </fieldset>
+      </div>
+    </section>
+    <section class="tabPanel" data-panel="catalogs">
+    <div class="catBody">
+      <p class="hint">Tick a catalog to show it on the sky and in the tables. When several catalogs contain the
+        same object id, the one with the lower priority number is used.</p>
+      <ul id="catList"></ul>
+      <fieldset>
+        <legend>Import a catalog</legend>
+        <div id="ciForm" class="ciGrid">
+          <label class="filebtn">Choose file… <input id="ciFile" type="file" accept=".csv,.txt,.json"></label>
+          <label>Id <input id="ciId" placeholder="e.g. vdb" maxlength="40"></label>
+          <label>Name <input id="ci_name" placeholder="van den Bergh"></label>
+          <label>Priority <input id="ci_priority" type="number" value="50" min="1" max="99"></label>
+          <label class="wide">Description <input id="ci_description"></label>
+          <label>Source <input id="ci_source"></label>
+          <label>License <input id="ci_license"></label>
+        </div>
+        <p class="hint">CSV with a header row <code>id,name,type,ra,dec,mag,maj,min,pa</code> (',' ';' or tab).
+          RA in degrees or <code>h:m:s</code>, Dec in degrees or <code>d:m:s</code>, sizes in arcminutes.
+          Types: G, GC, OC, EN, RN, PN, SNR, DN, AST. JSON: a list of such objects.</p>
+        <div class="row"><button type="button" id="ciImport">Import</button><span id="ciMsg" class="hint"></span></div>
+      </fieldset>
+    </div>
+    </section>
+    <section class="tabPanel" data-panel="horizon">
+    <div class="hzBody">
+      <p class="hint">One <b>azimuth altitude</b> pair per line (degrees, azimuth from north through east).
+        Stellarium (<code>.txt</code>), NINA (<code>.hrz</code>) and CSV files can be imported.
+        The profile is drawn on the sky, shown in the altitude chart and used for imageable hours.</p>
+      <textarea id="hzText" rows="14" spellcheck="false" placeholder="0 12&#10;45 20&#10;90 8&#10;180 5&#10;270 25"></textarea>
+      <div class="row"><label class="filebtn">Import file… <input id="hzFile" type="file" accept=".txt,.hrz,.hzn,.csv"></label>
+        <button type="button" id="hzFlat">Flat horizon</button><button type="button" id="hzSave">Save horizon</button><span id="hzInfo" class="hint"></span></div>
+    </div>
+    </section>
+    <section class="tabPanel" data-panel="equipment">
     <div class="dlgBody">
       <div class="setupList">
         <ul id="setupList"></ul>
@@ -132,9 +212,9 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
         <label>Name <input id="f_name" placeholder="e.g. RedCat 51 + ASI2600"></label>
         <fieldset>
           <legend>Telescope / lens</legend>
-          <label>Focal length <input id="f_focal" type="number" min="1" step="1"> mm</label>
-          <label>Reducer / Barlow <input id="f_reducer" type="number" min="0.1" step="0.01"> ×</label>
-          <label>Aperture <input id="f_aperture" type="number" min="1" step="1"> mm</label>
+          <label>Focal length <input id="f_focal" type="number" min="1" step="any"> mm</label>
+          <label>Reducer / Barlow <input id="f_reducer" type="number" min="0.1" step="any"> ×</label>
+          <label>Aperture <input id="f_aperture" type="number" min="1" step="any"> mm</label>
         </fieldset>
         <fieldset>
           <legend>Camera</legend>
@@ -148,21 +228,23 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
               <option value="12.5,10,3.76">ZWO ASI571</option>
               <option value="11.1,6.3,2.9">ZWO ASI585</option>
               <option value="5.6,3.2,2.9">ZWO ASI462</option>
+              <option value="5.57,3.13,2.9" data-focal="250" data-aperture="50" data-mount="altaz">ZWO Seestar S50 (250 mm, alt-az)</option>
+              <option value="11.14,6.26,2.9" data-focal="260" data-aperture="50" data-mount="altaz">ZWO Seestar S50 Pro (260 mm, alt-az)</option>
               <option value="13.2,8.8,2.4">ZWO ASI183</option>
               <option value="22.3,14.9,4.3">Canon APS-C (e.g. 2000D)</option>
               <option value="23.5,15.6,3.9">Nikon / Sony APS-C</option>
               <option value="36,24,5.9">Full-frame DSLR / mirrorless</option>
             </select>
           </label>
-          <label>Sensor <input id="f_sw" type="number" step="0.1"> × <input id="f_sh" type="number" step="0.1"> mm</label>
-          <label>Pixel size <input id="f_px" type="number" step="0.01"> µm</label>
+          <label>Sensor <input id="f_sw" type="number" step="any"> × <input id="f_sh" type="number" step="any"> mm</label>
+          <label>Pixel size <input id="f_px" type="number" step="any"> µm</label>
           <label>Mount
             <select id="f_mount">
               <option value="eq">Equatorial (frame fixed to celestial north)</option>
               <option value="altaz">Alt-Az (frame fixed to horizon)</option>
             </select>
           </label>
-          <label title="Equatorial: position angle of the frame's top edge, N→E. Alt-Az: angle from vertical.">Rotation <input id="f_rot" type="number" step="1"> °</label>
+          <label title="Equatorial: position angle of the frame's top edge, N→E. Alt-Az: angle from vertical.">Rotation <input id="f_rot" type="number" step="any"> °</label>
         </fieldset>
         <fieldset>
           <legend>Display</legend>
@@ -172,29 +254,45 @@ addEventListener('unhandledrejection', (e) => __showErr(String(e.reason?.message
         <div class="computed" id="f_computed"></div>
       </div>
     </div>
-    <div class="dlgFoot">
-      <button type="button" id="useSetup">Use this setup</button>
-      <button value="close">Close</button>
-    </div>
+      <div class="row eqFoot"><button type="button" id="useSetup">Use this setup</button></div>
+    </section>
+    <section class="tabPanel" data-panel="performance">
+      <div class="objBody">
+        <fieldset>
+          <legend>Graphics in use</legend>
+          <div><b id="pfRenderer"></b></div>
+          <div>Rendering: <span id="pfKind"></span></div>
+          <p class="hint">The browser decides whether the GPU is used (hardware acceleration must be enabled in its settings).
+            The app can only ask for a GPU and adapt its own load.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Rendering mode</legend>
+          <label><input type="radio" name="pfMode" value="hardware"> <b>Hardware GPU</b> — full resolution, antialiasing, 60 fps, dedicated GPU preferred</label>
+          <label><input type="radio" name="pfMode" value="software"> <b>Software (CPU)</b> — half resolution, no antialiasing, 30 fps; for computers without a usable GPU</label>
+          <label><input type="radio" name="pfMode" value="custom" disabled> Custom (set below)</label>
+        </fieldset>
+        <fieldset>
+          <legend>Details</legend>
+          <label>GPU
+            <select id="pfGpu">
+              <option value="high-performance">Dedicated GPU (high performance)</option>
+              <option value="low-power">Integrated GPU (power saving)</option>
+              <option value="default">Browser default</option>
+            </select></label>
+          <label>Resolution
+            <select id="pfScale"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option></select></label>
+          <label>Max. frame rate
+            <select id="pfFps"><option value="60">60 fps</option><option value="30">30 fps</option></select></label>
+          <label><input type="checkbox" id="pfAa"> Antialiasing</label>
+          <div class="row"><button type="button" id="pfReload" hidden>Reload to apply GPU / antialiasing</button></div>
+          <p class="hint">The sky is redrawn only when something changes (view, time, data), so an idle window uses almost no CPU / GPU.</p>
+        </fieldset>
+      </div>
+    </section>
+    <div class="dlgFoot"><button value="close">Close</button></div>
   </form>
 </dialog>
 
-<div id="redFilter"></div>
-<dialog id="hzDlg">
-  <form method="dialog" class="dlg">
-    <h2>Horizon</h2>
-    <div class="hzBody">
-      <p class="hint">One <b>azimuth altitude</b> pair per line (degrees, azimuth from north through east).
-        Stellarium (<code>.txt</code>), NINA (<code>.hrz</code>) and CSV files can be imported.
-        The profile is drawn on the sky, shown in the altitude chart and used for imageable hours.</p>
-      <textarea id="hzText" rows="14" spellcheck="false" placeholder="0 12&#10;45 20&#10;90 8&#10;180 5&#10;270 25"></textarea>
-      <div class="row"><label class="filebtn">Import file… <input id="hzFile" type="file" accept=".txt,.hrz,.hzn,.csv"></label>
-        <button type="button" id="hzFlat">Flat horizon</button><span id="hzInfo" class="hint"></span></div>
-    </div>
-    <div class="dlgFoot"><button type="button" id="hzSave">Save</button><button value="close">Cancel</button></div>
-  </form>
-</dialog>
-
-<script type="module" src="/static/js/main.js"></script>
+<script type="module" src="/static/js/boot.js"></script>
 </body>
 </html>

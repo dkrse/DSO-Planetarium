@@ -19,8 +19,17 @@ import { init as init_time } from './time.js';
 import { init as init_panels } from './panels.js';
 import { init as init_settings } from './settings.js';
 import { init as init_horizon } from './horizon.js';
+import { init as init_catalogs } from './catalogs.js';
+import { init as init_dialog } from './dialog.js';
+import { init as init_objtypes } from './objtypes.js';
+import { init as init_perf } from './perf.js';
+import { renderer, scene, camera, eqGroup } from './scene.js';
+import { nodes } from './objects.js';
 
 // initialise modules in dependency order (same order as the original single-file app)
+// debugging aid: inspect the app state from the browser console (window.__dso)
+window.__dso = { S, nodes, scene, camera, eqGroup, renderer, prof: null, fn: {} };
+
 init_core();
 init_sync();
 init_targets();
@@ -32,6 +41,10 @@ init_time();
 init_panels();
 init_settings();
 init_horizon();
+init_catalogs();
+init_dialog();
+init_objtypes();
+init_perf(renderer);
 
 // ---------------------------------------------------------------- start
 (async function init() {

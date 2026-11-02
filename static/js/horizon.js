@@ -1,9 +1,11 @@
+import { invalidate } from './loop.js';
+import { onTab } from './dialog.js';
 // ---------------------------------------------------------------- custom horizon profile
 // A list of [azimuth, altitude] points stored on the server (settings.horizon). It is drawn as a
 // silhouette on the sky, shown in the altitude chart and used by the server for imageable hours.
 import * as THREE from 'three';
 import { $, R, S } from './core.js';
-import { scene, hzVec } from './scene.js';
+import { ground, horizonRing, scene, hzVec } from './scene.js';
 import { api } from './sync.js';
 import { loadVisibility, drawChart } from './panels.js';
 
@@ -24,6 +26,7 @@ export function horizonAlt(az, pts = S.horizon) {
 
 /** Is a world-space direction above the local horizon profile? (used to hide labels behind trees / buildings) */
 export function aboveHorizon(v, margin = 0) {
+  if (S.showGround === false) return true;              // ground hidden → everything counts as visible
   const len = v.length(), alt = Math.asin(v.y / len) * 180 / Math.PI;
   if (!S.horizon.length) return alt > margin;
   return alt > horizonAlt(Math.atan2(v.x, -v.z) * 180 / Math.PI) + margin;
@@ -63,18 +66,24 @@ const silMat = new THREE.MeshBasicMaterial({ color: 0x0b0f0a, side: THREE.Double
 const edgeMat = new THREE.LineBasicMaterial({ color: 0x8a6a2a });
 export function setSilhouetteColor(hex) { silMat.color.setHex(hex); }
 
+/** Show / hide the ground, the horizon line and the horizon profile (objects below the horizon become visible). */
+export function setGroundVisible(on) {
+  S.showGround = on;
+  ground.visible = horizonRing.visible = silhouette.visible = on;
+  invalidate();
+}
+
 export function setHorizon(pts) {
-  S.horizon = pts; buildSilhouette(); drawChart();
+  S.horizon = pts; buildSilhouette(); drawChart(); invalidate();
 }
 async function saveHorizon(pts) {
   const r = await api('PATCH', '/api/settings', { horizon: pts });
   setHorizon(r.horizon); loadVisibility();
 }
 
-function openDialog() {
+function fillTab() {
   $('hzText').value = formatHorizon(S.horizon);
   $('hzInfo').textContent = '';
-  $('hzDlg').showModal();
 }
 function preview() {
   const pts = parseHorizon($('hzText').value);
@@ -83,7 +92,7 @@ function preview() {
 
 export function init() {
   scene.add(silhouette);
-  $('hzBtn').onclick = openDialog;
+  onTab('horizon', fillTab);
   $('hzText').addEventListener('input', preview);
   $('hzFile').onchange = async () => {
     const f = $('hzFile').files[0]; if (!f) return;
@@ -91,7 +100,7 @@ export function init() {
   };
   $('hzFlat').onclick = () => { $('hzText').value = ''; preview(); };
   $('hzSave').onclick = async () => {
-    try { await saveHorizon(parseHorizon($('hzText').value)); $('hzDlg').close(); }
+    try { await saveHorizon(parseHorizon($('hzText').value)); $('hzInfo').textContent = `✓ saved (${S.horizon.length} points)`; }
     catch (e) { $('hzInfo').textContent = '⚠ ' + e.message; }
   };
 }

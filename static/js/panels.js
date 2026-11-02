@@ -1,9 +1,11 @@
-import { D2R, PLANET_INFO, altaz, fmtDec, fmtRA, jd, lstDeg, moonRaDec, planets, precess, sunRaDec } from '../astro.js';
+import { buildFovBoxes } from './framing.js';
+import { openSettings } from './dialog.js';
+import { BODY_INFO, D2R, PLANET_INFO, altaz, bodies, fmtDec, fmtRA, jd, lstDeg, moonRaDec, planets, precess, sunRaDec } from '../astro.js';
 import { $, S, active, fmtT, fov, store } from './core.js';
 import { horizonAlt } from './horizon.js';
 import { frameGeom } from './framing.js';
 import { wp } from './loop.js';
-import { buildObjects, gotoPlanet, nodes, planetOf, sel3D, selLabel, selRaDec } from './objects.js';
+import { BODY_NAMES, buildObjects, clearObjects, gotoPlanet, nodes, planetOf, sel3D, selLabel, selRaDec } from './objects.js';
 import { aimAt, camera, scene } from './scene.js';
 import { renderTargets } from './targets.js';
 import { drawNightBar } from './time.js';
@@ -11,9 +13,30 @@ import { drawNightBar } from './time.js';
 // ---------------------------------------------------------------- API data
 export async function loadCatalog() {
   const r = await fetch('/api/catalog').then((r) => r.json());
-  S.catalog = r.objects; S.types = r.types;
-  for (const [k, v] of Object.entries(r.types)) $('typeFilter').append(new Option(v, k));
-  buildObjects();
+  S.catalog = r.objects; S.types = r.types; S.catalogs = r.catalogs; S.typeCounts = r.type_counts;
+  if ($('typeFilter').options.length === 1) {
+    for (const [k, v] of Object.entries(r.types)) $('typeFilter').append(new Option(v, k));
+    $('typeFilter').value = store.get('typeFilter', '');
+  }
+  // catalog filter lists the visible catalogs only
+  const cf = $('catFilter'), keep = cf.value || store.get('catFilter', '');
+  cf.length = 1;
+  for (const c of r.catalogs) if (!c.hidden) cf.append(new Option(`${c.name} (${c.shown})`, c.id));
+  cf.value = [...cf.options].some((o) => o.value === keep) ? keep : '';
+  clearObjects(); buildObjects();
+  // remind that some object types / catalogs are switched off in the settings
+  const ht = S.hiddenTypes?.length ?? 0, hc = r.catalogs.filter((c) => c.hidden).length;
+  const parts = [ht && `${ht} object type${ht > 1 ? 's' : ''}`, hc && `${hc} catalog${hc > 1 ? 's' : ''}`].filter(Boolean);
+  $('hiddenNote').hidden = !parts.length;
+  $('hiddenNote').textContent = `⚠ ${parts.join(' and ')} hidden – Settings…`;
+  $('hiddenNote').onclick = () => openSettings(ht ? 'objects' : 'catalogs');
+}
+
+/** Re-read catalogs after showing / hiding / importing / deleting one. */
+export async function reloadCatalog() {
+  await loadCatalog();
+  if (S.selected && !planetOf(S.selected) && !nodes.has(S.selected)) { S.selected = null; S.track = false; renderDetail(); }
+  await loadVisibility();
 }
 
 export let visReq = 0;
@@ -33,35 +56,38 @@ export function renderNight() {
     <div class="row"><span>Sunset <b>${fmtT(n.sun_dusk)}</b></span><span>Sunrise <b>${fmtT(n.sun_dawn)}</b></span></div>
     <div class="row"><span>Astro night <b>${fmtT(n.astro_dusk)}</b></span><span>to <b>${fmtT(n.astro_dawn)}</b></span><span>Dark <b>${n.dark_hours.toFixed(1)} h</b></span></div>
     <div class="row"><span>Moon ↑ <b>${fmtT(n.moon_rise)}</b> ↓ <b>${fmtT(n.moon_set)}</b></span><span>Illum. <b>${Math.round(n.moon_illum * 100)}% ${n.moon_waxing ? '(waxing)' : '(waning)'}</b></span></div>
-    <details class="planets" ${store.get('plOpen', false) ? 'open' : ''}><summary>Planets</summary>
-      <table><thead><tr><th>Planet</th><th>Mag</th><th>Size</th><th>Rise</th><th>Transit</th><th>Set</th><th>Max</th></tr></thead><tbody>
-      ${pl.map((r) => `<tr data-planet="${r.name}"><td><span class="pdot" style="background:${PLANET_INFO[r.name].color}"></span><b>${r.name}</b></td><td>${r.mag.toFixed(1)}</td>
+    <details class="planets" ${store.get('plOpen', false) ? 'open' : ''}><summary>Sun, Moon &amp; planets</summary>
+      <table><thead><tr><th>Body</th><th>Mag</th><th>Size</th><th>Rise</th><th>Transit</th><th>Set</th><th>Max</th></tr></thead><tbody>
+      ${pl.map((r) => `<tr data-planet="${r.name}"><td><span class="pdot" style="background:${BODY_INFO[r.name].color}"></span><b>${r.name}</b></td><td>${r.mag.toFixed(1)}</td>
         <td>${r.diam.toFixed(r.diam < 10 ? 1 : 0)}″</td><td>${fmtT(r.rise)}</td><td>${fmtT(r.transit)}</td><td>${fmtT(r.set)}</td>
-        <td class="${r.maxDark < S.minAlt ? 'down' : ''}" title="Max altitude during astronomical darkness">${r.maxDark > -90 ? r.maxDark.toFixed(0) + '°' : '—'}</td></tr>`).join('')}
+        <td class="${r.maxDark < S.minAlt ? 'down' : ''}" title="Max altitude during astronomical darkness">${r.maxDark > -90 && r.name !== 'Sun' ? r.maxDark.toFixed(0) + '°' : '—'}</td></tr>`).join('')}
       </tbody></table></details>`;
   $('nightInfo').querySelector('details').ontoggle = (e) => store.set('plOpen', e.target.open);
   $('nightInfo').querySelector('tbody').onclick = (e) => { const tr = e.target.closest('tr'); if (tr) gotoPlanet(tr.dataset.planet); };
 }
 
 // rise / transit / set of planets for the current night window (sampled every 10 min)
+// Sun, Moon and planets: rise / transit / set for the night window (sampled every 10 min)
+const H0 = { Sun: -0.833, Moon: 0.125 };          // standard altitudes; planets −0.567 (refraction)
 export function planetTable() {
-  const N = 144, t0 = S.windowStart.getTime(), rows = Object.keys(PLANET_INFO).map((name) => ({ name, alts: [], maxDark: -99 }));
+  const N = 144, t0 = S.windowStart.getTime(), rows = BODY_NAMES.map((name) => ({ name, alts: [], maxDark: -99 }));
   const times = [];
   for (let i = 0; i <= N; i++) {
     const t = t0 + i * 600000, j = jd(new Date(t)), l = lstDeg(j, S.lon);
     const [sra, sdec] = sunRaDec(j), dark = altaz(sra, sdec, S.lat, l)[0] <= -18;
     times.push(t);
-    planets(j).forEach((p, k) => {
+    bodies(j).forEach((p, k) => {
       const a = altaz(...precess(p.ra, p.dec, j), S.lat, l)[0]; rows[k].alts.push(a);
       if (dark) rows[k].maxDark = Math.max(rows[k].maxDark, a);
-      if (i === N / 2) Object.assign(rows[k], { mag: p.mag, diam: p.diam });
+      if (i === N / 2) Object.assign(rows[k], { mag: p.mag, diam: p.diam, illum: p.illum });
     });
   }
   for (const r of rows) {
     let best = 0;
+    const h0 = H0[r.name] ?? -0.567;
     for (let i = 0; i < N; i++) {
-      const a0 = r.alts[i], a1 = r.alts[i + 1];
-      if (a1 > r.alts[best]) best = i + 1;
+      const a0 = r.alts[i] - h0, a1 = r.alts[i + 1] - h0;
+      if (r.alts[i + 1] > r.alts[best]) best = i + 1;
       if ((a0 < 0) !== (a1 < 0)) {
         const t = new Date(times[i] + (times[i + 1] - times[i]) * a0 / (a0 - a1));
         if (a1 > a0) r.rise ??= t; else r.set ??= t;
@@ -76,34 +102,73 @@ export function planetTable() {
 export let tblTimer = 0;
 export const renderTableSoon = () => { clearTimeout(tblTimer); tblTimer = setTimeout(renderTable, 120); };
 
-export function rowData(o) {
-  const f = fov(), v = S.vis[o.id] || {};
-  const j = jd(S.time), alt = altaz(...precess(o.ra, o.dec, j), S.lat, lstDeg(j, S.lon))[0];
-  const short = Math.min(f.w, f.h) * 60;
-  return { o, v, alt, fill: o.maj / short * 100, hours: v.hours ?? 0, transit: v.transit ? new Date(v.transit).getTime() : 0 };
+// coordinates of date: precession changes by < 1″ per night, so it is computed once per night and object
+const ofDate = new Map(); let ofDateKey = 0;
+function radecOfDate(o) {
+  const key = S.windowStart?.getTime() ?? 0;
+  if (key !== ofDateKey) { ofDate.clear(); ofDateKey = key; }
+  let c = ofDate.get(o.id);
+  if (!c) { c = precess(o.ra, o.dec, jd(new Date(key + 12 * 3600000))); ofDate.set(o.id, c); }
+  return c;
+}
+const altNow = (o, lst) => altaz(...radecOfDate(o), S.lat, lst)[0];
+
+export function rowData(o, lst = lstDeg(jd(S.time), S.lon), short = Math.min(fov().w, fov().h) * 60) {
+  const v = S.vis[o.id] || {};
+  return { o, v, alt: altNow(o, lst), fill: o.maj / short * 100, hours: v.hours ?? 0, transit: v.transit ? new Date(v.transit).getTime() : 0 };
+}
+
+/** Time changed: refresh only the altitude cells of the rendered rows (full render only when sorted by altitude). */
+export function updateTableTime() {
+  if (S.sort[0] === 'alt') return renderTableSoon();
+  const lst = lstDeg(jd(S.time), S.lon);
+  for (const tr of $('list').tBodies[0].rows) {
+    const o = tr.dataset.id && nodes.get(tr.dataset.id)?.o; if (!o) continue;
+    const td = tr.cells[4], alt = altNow(o, lst), txt = alt.toFixed(0) + '°';
+    if (td.textContent !== txt) {
+      td.textContent = txt; td.className = alt < 0 ? 'down' : '';
+      td.style.color = alt >= S.minAlt ? '#4ade80' : '';
+    }
+  }
 }
 
 export function renderTable() {
   if (!S.catalog.length) return;
-  const q = $('search').value.trim().toLowerCase().replace(/\s+/g, ''), tf = $('typeFilter').value;
+  const q = $('search').value.trim().toLowerCase().replace(/\s+/g, ''), tf = $('typeFilter').value, cf = $('catFilter').value;
   const f = fov(), long = Math.max(f.w, f.h) * 60, short = Math.min(f.w, f.h) * 60;
-  let rows = S.catalog.map(rowData).filter(({ o, v }) =>
-    (!q || (o.id + o.name).toLowerCase().replace(/\s+/g, '').includes(q)) && (!tf || o.type === tf) &&
+  const lst0 = lstDeg(jd(S.time), S.lon), short0 = Math.min(f.w, f.h) * 60;
+  let rows = S.catalog.map((o) => rowData(o, lst0, short0)).filter(({ o, v }) =>
+    (!q || (o.id + o.name + (o.aka ?? []).join('')).toLowerCase().replace(/\s+/g, '').includes(q)) && (!tf || o.type === tf) && (!cf || o.cat === cf) &&
     (!$('onlyVisible').checked || v.hours > 0 || q) &&
     (!$('fitFov').checked || (o.maj <= long && o.min <= short)));
   const [k, dir] = S.sort;
   const key = { id: (r) => r.o.id, type: (r) => r.o.type, maj: (r) => r.o.maj, fill: (r) => r.fill, alt: (r) => r.alt, transit: (r) => r.transit, hours: (r) => r.hours }[k];
   rows.sort((a, b) => { const x = key(a), y = key(b); return (x > y ? 1 : x < y ? -1 : 0) * dir || a.o.id.localeCompare(b.o.id, undefined, { numeric: true }); });
-  $('list').tBodies[0].innerHTML = rows.map(({ o, v, alt, fill }) => `
+  // only the first rows are rendered (fast with thousands of objects); "show more" extends the list
+  const total = rows.length, limit = S.tableLimit ?? 300;
+  rows = rows.slice(0, limit);
+  // Sun, Moon and planets matching the search are listed first
+  const j = jd(S.time), lst = lstDeg(j, S.lon);
+  const bodyRows = q ? bodies(j).filter((b) => b.name.toLowerCase().includes(q)).map((b) => {
+    const alt = altaz(...precess(b.ra, b.dec, j), S.lat, lst)[0], pr = (S.planetRows || []).find((x) => x.name === b.name) || {};
+    const size = b.diam >= 600 ? (b.diam / 60).toFixed(0) + '′' : b.diam.toFixed(b.diam < 10 ? 1 : 0) + '″';
+    return `<tr data-body="${b.name}" class="body ${S.selected === 'P:' + b.name ? 'sel' : ''}">
+      <td><span class="pdot" style="background:${BODY_INFO[b.name].color}"></span><b>${b.name}</b>
+        <span class="nm">${b.name === 'Sun' ? 'Star' : b.name === 'Moon' ? 'Moon' : 'Planet'} · mag ${b.mag.toFixed(1)}</span></td>
+      <td>—</td><td>${size}</td><td></td>
+      <td class="${alt < 0 ? 'down' : ''}">${alt.toFixed(0)}°</td><td>${fmtT(pr.transit)}</td><td></td></tr>`;
+  }).join('') : '';
+  $('list').tBodies[0].innerHTML = bodyRows + rows.map(({ o, v, alt, fill }) => `
     <tr data-id="${o.id}" class="${S.selected === o.id ? 'sel' : ''}">
-      <td><b>${o.id}</b><span class="nm">${o.name || '&nbsp;'}</span></td>
+      <td><b>${o.id}</b><span class="nm" title="${o.aka ? 'also ' + o.aka.join(', ') : ''}">${o.name || (o.aka ? o.aka.join(', ') : '&nbsp;')}</span></td>
       <td class="t-${o.type}">${o.type}</td>
       <td>${o.maj >= 1 ? o.maj.toFixed(0) : o.maj}′${o.min !== o.maj ? '×' + (o.min >= 1 ? o.min.toFixed(0) : o.min) + '′' : ''}</td>
       <td style="color:${fill > 100 ? '#f87171' : fill > 25 ? '#4ade80' : '#7d8aa3'}">${fill.toFixed(0)}%</td>
       <td class="${alt < 0 ? 'down' : ''}" style="${alt >= S.minAlt ? 'color:#4ade80' : ''}">${alt.toFixed(0)}°</td>
       <td>${fmtT(v.transit)}<span class="nm">max ${v.max_alt ?? '—'}°</span></td>
       <td>${(v.hours ?? 0).toFixed(1)}</td>
-    </tr>`).join('');
+    </tr>`).join('') + (total > limit
+    ? `<tr class="more"><td colspan="7"><button type="button" data-more>Show ${Math.min(300, total - limit)} more of ${total - limit}…</button></td></tr>` : '');
 }
 
 // ---------------------------------------------------------------- object detail
@@ -133,7 +198,7 @@ export function renderDetail() {
   el.hidden = false;
   el.innerHTML = `
     <h3>${o.id} ${o.name ? '– ' + o.name : ''}</h3>
-    <div style="color:#7d8aa3;margin-bottom:4px"><span class="t-${o.type}">${S.types[o.type]}</span> · mag ${o.mag || '—'} · ${o.maj}′ × ${o.min}′ ${statusTxt ? '· ' + statusTxt : ''}</div>
+    <div style="color:#7d8aa3;margin-bottom:4px"><span class="t-${o.type}">${S.types[o.type]}</span> · ${S.catalogs?.find((c) => c.id === o.cat)?.name ?? ''}${o.aka ? ' · also ' + o.aka.join(', ') : ''} · mag ${o.mag || '—'} · ${o.maj}′ × ${o.min}′ ${statusTxt ? '· ' + statusTxt : ''}</div>
     <div class="kv">
       <span>RA</span><b>${fmtRA(o.ra)}</b><span>Dec</span><b>${fmtDec(o.dec)}</b>
       <span>Rise</span><b>${fmtT(v.rise)}</b><span>Set</span><b>${fmtT(v.set)}</b>
@@ -147,23 +212,33 @@ export function renderDetail() {
   $('bCenter').onclick = () => select(o.id, true);
   $('bTrack').onclick = () => { S.track = !S.track; renderDetail(); };
   $('bFrame').onclick = () => { S.track = true; frameFov(); renderDetail(); };
-  $('bClose').onclick = () => { n.lbl.element.classList.remove('sel'); S.selected = null; S.track = false; renderDetail(); renderTable(); };
+  $('bClose').onclick = deselect;
   drawChart();
 }
 
+/** Clear the selection; the FOV frame is released and follows the view again. */
+export function deselect() {
+  if (!S.selected) return;
+  selLabel(S.selected)?.element.classList.remove('sel');
+  S.selected = null; S.track = false; S.frame = null; buildFovBoxes();
+  renderDetail(); renderTable();
+}
+
 export function renderPlanetDetail(el) {
-  const pn = planetOf(S.selected), p = planets(jd(S.time)).find((x) => x.name === pn.name);
+  const pn = planetOf(S.selected), p = bodies(jd(S.time)).find((x) => x.name === pn.name);
   const r = (S.planetRows || []).find((x) => x.name === pn.name) || {}, f = fov();
-  const ill = (1 + Math.cos(p.phase * D2R)) / 2;
+  const ill = p.illum ?? (1 + Math.cos(p.phase * D2R)) / 2;
+  const kind = pn.name === 'Sun' ? 'Star' : pn.name === 'Moon' ? 'Moon' : 'Planet';
+  const dist = pn.name === 'Moon' ? '≈ 384 400 km' : `${p.dist.toFixed(3)} AU`;
   el.hidden = false;
   el.innerHTML = `
-    <h3><span class="pdot" style="background:${PLANET_INFO[pn.name].color}"></span>${pn.name}</h3>
-    <div style="color:var(--dim);margin-bottom:4px">Planet · mag ${p.mag.toFixed(1)} · ${p.diam.toFixed(1)}″ · ${Math.round(ill * 100)}% lit</div>
+    <h3><span class="pdot" style="background:${BODY_INFO[pn.name].color}"></span>${pn.name}</h3>
+    <div style="color:var(--dim);margin-bottom:4px">${kind} · mag ${p.mag.toFixed(1)} · ${p.diam >= 600 ? (p.diam / 60).toFixed(1) + '′' : p.diam.toFixed(1) + '″'}${pn.name === 'Sun' ? '' : ` · ${Math.round(ill * 100)}% lit`}</div>
     <div class="kv">
       <span>RA</span><b>${fmtRA(p.ra)}</b><span>Dec</span><b>${fmtDec(p.dec)}</b>
       <span>Rise</span><b>${fmtT(r.rise)}</b><span>Set</span><b>${fmtT(r.set)}</b>
-      <span>Transit</span><b>${fmtT(r.transit)}</b><span>Max (dark)</span><b>${r.maxDark > -90 ? r.maxDark.toFixed(0) + '°' : '—'}</b>
-      <span>Distance</span><b>${p.dist.toFixed(3)} AU</b><span>From Sun</span><b>${p.r.toFixed(3)} AU</b>
+      <span>Transit</span><b>${fmtT(r.transit)}</b><span>Max (dark)</span><b>${r.maxDark > -90 && pn.name !== 'Sun' ? r.maxDark.toFixed(0) + '°' : '—'}</b>
+      <span>Distance</span><b>${dist}</b><span>${pn.name === 'Sun' ? '' : 'From Sun'}</span><b>${pn.name === 'Sun' ? '' : p.r.toFixed(3) + ' AU'}</b>
       <span>Disc on sensor</span><b>${(p.diam / f.scale).toFixed(0)} px</b><span>Of short side</span><b>${(p.diam / 36 / Math.min(f.w, f.h)).toFixed(2)}%</b>
     </div>
     <canvas id="chart" width="840" height="340"></canvas>
@@ -171,7 +246,7 @@ export function renderPlanetDetail(el) {
   $('bCenter').onclick = () => select(S.selected, true);
   $('bTrack').onclick = () => { S.track = !S.track; renderDetail(); };
   $('bFrame').onclick = () => { S.track = true; frameFov(); renderDetail(); };
-  $('bClose').onclick = () => { pn.lbl.element.classList.remove('sel'); S.selected = null; S.track = false; renderDetail(); };
+  $('bClose').onclick = deselect;
   drawChart();
 }
 
@@ -256,10 +331,15 @@ export function drawChart() {
 
 // module setup – called once from main.js after all modules are loaded
 export function init() {
-  ['search', 'typeFilter', 'onlyVisible', 'fitFov'].forEach((id) => $(id).addEventListener('input', renderTable));
+  if (window.__dso) Object.assign(window.__dso.fn, { renderTable, drawChart, renderNight, planetTable, loadVisibility, renderDetail });
+  ['search', 'typeFilter', 'catFilter', 'onlyVisible', 'fitFov'].forEach((id) => $(id).addEventListener('input', () => { S.tableLimit = 300; renderTableSoon(); }));   // debounced: typing stays fluid
   document.querySelectorAll('th[data-sort]').forEach((th) => th.onclick = () => {
     const k = th.dataset.sort; S.sort = [k, S.sort[0] === k ? -S.sort[1] : (k === 'id' || k === 'type' || k === 'transit' ? 1 : -1)];
     store.set('sort', S.sort); renderTable();
   });
-  $('list').tBodies[0].onclick = (e) => { const tr = e.target.closest('tr'); if (tr) select(tr.dataset.id, true); };
+  $('list').tBodies[0].onclick = (e) => {
+    if (e.target.dataset.more !== undefined) { S.tableLimit = (S.tableLimit ?? 300) + 300; renderTable(); return; }
+    const b = e.target.closest('tr[data-body]'); if (b) { select('P:' + b.dataset.body, true); return; }
+    const tr = e.target.closest('tr[data-id]'); if (tr) select(tr.dataset.id, true);
+  };
 }

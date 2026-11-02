@@ -1,198 +1,225 @@
-"""Deep-sky catalog.
+"""Deep-sky catalogs.
 
-Main source: app/data/catalog.json, built from OpenNGC (CC-BY-SA-4.0) by tools/build_catalog.py.
-The hand-made list below is used only as a fallback for objects that OpenNGC does not contain or
-lists differently (Sharpless / LDN objects, duplicates such as IC 2118, M102 = NGC 5866, …).
+Every catalog is one JSON file in app/data/catalogs/:
 
-Fallback entry: (id, name, type, RA [h], Dec [deg], mag, major axis ['], minor axis ['], PA [deg])
-Types: G galaxy, GC globular cluster, OC open cluster, EN emission nebula, RN reflection nebula,
-PN planetary nebula, SNR supernova remnant, DN dark nebula, AST asterism / star cloud. J2000.
+    {"id": "sharpless", "name": "Sharpless (Sh2)", "priority": 20, "builtin": true,
+     "description": "...", "source": "...", "license": "...",
+     "objects": [{"id": "Sh2-155", "name": "Cave Nebula", "type": "EN", "ra": 344.47, "dec": 62.52,
+                  "mag": 0, "maj": 50, "min": 30, "pa": 0}, ...]}
+
+Objects are merged by id; when two catalogs contain the same id, the catalog with the lower
+`priority` number wins (OpenNGC 10, Sharpless 20, Barnard 30, user imports 50, extras 90).
+Catalogs can be imported, deleted and hidden at run time (see app/main.py).
+
+Object types: G galaxy, GC globular cluster, OC open cluster, EN emission nebula, RN reflection
+nebula, PN planetary nebula, SNR supernova remnant, DN dark nebula, AST asterism / star cloud.
+Coordinates J2000 in degrees, sizes in arcminutes, PA in degrees (N→E).
 """
+import csv
+import io
 import json
+import math
+import re
+import threading
 from pathlib import Path
 
-DATA = Path(__file__).resolve().parent / "data" / "catalog.json"
-
-# fallback list (only entries missing from catalog.json are used)
-_RAW = [
-    ("M1", "Crab Nebula", "SNR", 5.5756, 22.014, 8.4, 7, 5, 55),
-    ("M2", "", "GC", 21.5576, -0.823, 6.5, 16, 16, 0),
-    ("M3", "", "GC", 13.7032, 28.377, 6.2, 18, 18, 0),
-    ("M4", "", "GC", 16.3931, -26.526, 5.6, 36, 36, 0),
-    ("M5", "", "GC", 15.3092, 2.081, 5.6, 23, 23, 0),
-    ("M6", "Butterfly Cluster", "OC", 17.668, -32.25, 4.2, 25, 25, 0),
-    ("M7", "Ptolemy Cluster", "OC", 17.898, -34.82, 3.3, 80, 80, 0),
-    ("M8", "Lagoon Nebula", "EN", 18.063, -24.38, 6.0, 90, 40, 0),
-    ("M9", "", "GC", 17.32, -18.52, 7.7, 12, 12, 0),
-    ("M10", "", "GC", 16.952, -4.1, 6.6, 20, 20, 0),
-    ("M11", "Wild Duck Cluster", "OC", 18.851, -6.27, 5.8, 14, 14, 0),
-    ("M12", "", "GC", 16.787, -1.95, 6.7, 16, 16, 0),
-    ("M13", "Great Hercules Cluster", "GC", 16.695, 36.46, 5.8, 20, 20, 0),
-    ("M14", "", "GC", 17.627, -3.25, 7.6, 11, 11, 0),
-    ("M15", "", "GC", 21.5, 12.17, 6.2, 18, 18, 0),
-    ("M16", "Eagle Nebula", "EN", 18.313, -13.78, 6.0, 35, 28, 0),
-    ("M17", "Omega Nebula", "EN", 18.346, -16.18, 6.0, 46, 37, 0),
-    ("M18", "", "OC", 18.332, -17.13, 7.5, 9, 9, 0),
-    ("M19", "", "GC", 17.043, -26.27, 6.8, 17, 17, 0),
-    ("M20", "Trifid Nebula", "EN", 18.045, -23.03, 6.3, 28, 28, 0),
-    ("M21", "", "OC", 18.077, -22.5, 6.5, 13, 13, 0),
-    ("M22", "", "GC", 18.607, -23.9, 5.1, 32, 32, 0),
-    ("M23", "", "OC", 17.948, -19.02, 6.9, 27, 27, 0),
-    ("M24", "Sagittarius Star Cloud", "AST", 18.28, -18.55, 4.6, 90, 40, 0),
-    ("M25", "", "OC", 18.53, -19.25, 4.6, 32, 32, 0),
-    ("M26", "", "OC", 18.754, -9.4, 8.0, 15, 15, 0),
-    ("M27", "Dumbbell Nebula", "PN", 19.993, 22.72, 7.5, 8, 5.6, 125),
-    ("M28", "", "GC", 18.409, -24.87, 6.8, 11, 11, 0),
-    ("M29", "", "OC", 20.398, 38.52, 7.1, 7, 7, 0),
-    ("M30", "", "GC", 21.673, -23.18, 7.2, 12, 12, 0),
-    ("M31", "Andromeda Galaxy", "G", 0.7123, 41.269, 3.4, 178, 63, 35),
-    ("M32", "", "G", 0.7114, 40.865, 8.1, 8, 6, 170),
-    ("M33", "Triangulum Galaxy", "G", 1.5641, 30.66, 5.7, 73, 45, 23),
-    ("M34", "", "OC", 2.702, 42.78, 5.5, 35, 35, 0),
-    ("M35", "", "OC", 6.148, 24.33, 5.3, 28, 28, 0),
-    ("M36", "", "OC", 5.602, 34.13, 6.3, 12, 12, 0),
-    ("M37", "", "OC", 5.873, 32.55, 6.2, 24, 24, 0),
-    ("M38", "", "OC", 5.478, 35.83, 7.4, 21, 21, 0),
-    ("M39", "", "OC", 21.535, 48.43, 4.6, 32, 32, 0),
-    ("M40", "Winnecke 4", "AST", 12.37, 58.08, 8.4, 1, 1, 0),
-    ("M41", "", "OC", 6.767, -20.73, 4.5, 38, 38, 0),
-    ("M42", "Orion Nebula", "EN", 5.588, -5.39, 4.0, 85, 60, 0),
-    ("M43", "De Mairan's Nebula", "EN", 5.593, -5.27, 9.0, 20, 15, 0),
-    ("M44", "Beehive Cluster", "OC", 8.667, 19.67, 3.7, 95, 95, 0),
-    ("M45", "Pleiades", "OC", 3.79, 24.12, 1.6, 110, 110, 0),
-    ("M46", "", "OC", 7.697, -14.82, 6.1, 27, 27, 0),
-    ("M47", "", "OC", 7.61, -14.5, 4.2, 30, 30, 0),
-    ("M48", "", "OC", 8.23, -5.75, 5.5, 54, 54, 0),
-    ("M49", "", "G", 12.497, 8.0, 8.4, 10, 8, 155),
-    ("M50", "", "OC", 7.053, -8.33, 5.9, 16, 16, 0),
-    ("M51", "Whirlpool Galaxy", "G", 13.498, 47.195, 8.4, 11, 7, 163),
-    ("M52", "", "OC", 23.407, 61.58, 7.3, 13, 13, 0),
-    ("M53", "", "GC", 13.215, 18.17, 7.6, 13, 13, 0),
-    ("M54", "", "GC", 18.918, -30.48, 7.6, 12, 12, 0),
-    ("M55", "", "GC", 19.667, -30.97, 6.3, 19, 19, 0),
-    ("M56", "", "GC", 19.277, 30.18, 8.3, 9, 9, 0),
-    ("M57", "Ring Nebula", "PN", 18.893, 33.03, 8.8, 1.4, 1.0, 60),
-    ("M58", "", "G", 12.629, 11.82, 9.7, 6, 5, 95),
-    ("M59", "", "G", 12.7, 11.65, 9.6, 5, 4, 165),
-    ("M60", "", "G", 12.728, 11.55, 8.8, 7, 6, 105),
-    ("M61", "", "G", 12.365, 4.47, 9.7, 6, 6, 0),
-    ("M62", "", "GC", 17.02, -30.12, 6.5, 15, 15, 0),
-    ("M63", "Sunflower Galaxy", "G", 13.264, 42.03, 8.6, 13, 7, 105),
-    ("M64", "Black Eye Galaxy", "G", 12.945, 21.68, 8.5, 10, 5, 115),
-    ("M65", "", "G", 11.316, 13.08, 9.3, 10, 3, 174),
-    ("M66", "", "G", 11.338, 12.99, 8.9, 9, 4, 173),
-    ("M67", "", "OC", 8.857, 11.82, 6.1, 30, 30, 0),
-    ("M68", "", "GC", 12.658, -26.75, 7.8, 11, 11, 0),
-    ("M69", "", "GC", 18.523, -32.35, 7.6, 10, 10, 0),
-    ("M70", "", "GC", 18.72, -32.3, 7.9, 8, 8, 0),
-    ("M71", "", "GC", 19.896, 18.78, 8.2, 7, 7, 0),
-    ("M72", "", "GC", 20.891, -12.53, 9.3, 7, 7, 0),
-    ("M73", "", "AST", 20.983, -12.63, 9.0, 3, 3, 0),
-    ("M74", "Phantom Galaxy", "G", 1.611, 15.78, 9.4, 10, 9, 0),
-    ("M75", "", "GC", 20.101, -21.92, 8.5, 7, 7, 0),
-    ("M76", "Little Dumbbell", "PN", 1.705, 51.57, 10.1, 2.7, 1.8, 40),
-    ("M77", "", "G", 2.711, -0.01, 8.9, 7, 6, 70),
-    ("M78", "", "RN", 5.779, 0.05, 8.3, 8, 6, 0),
-    ("M79", "", "GC", 5.408, -24.52, 7.7, 10, 10, 0),
-    ("M80", "", "GC", 16.284, -22.98, 7.3, 10, 10, 0),
-    ("M81", "Bode's Galaxy", "G", 9.926, 69.065, 6.9, 27, 14, 157),
-    ("M82", "Cigar Galaxy", "G", 9.931, 69.68, 8.4, 11, 4, 65),
-    ("M83", "Southern Pinwheel", "G", 13.617, -29.87, 7.5, 13, 12, 45),
-    ("M84", "", "G", 12.418, 12.89, 9.1, 6.5, 5.6, 135),
-    ("M85", "", "G", 12.424, 18.19, 9.1, 7, 5, 20),
-    ("M86", "", "G", 12.437, 12.95, 8.9, 9, 6, 128),
-    ("M87", "Virgo A", "G", 12.514, 12.39, 8.6, 8, 6, 0),
-    ("M88", "", "G", 12.533, 14.42, 9.6, 7, 4, 142),
-    ("M89", "", "G", 12.594, 12.56, 9.8, 5, 5, 0),
-    ("M90", "", "G", 12.614, 13.16, 9.5, 10, 4, 23),
-    ("M91", "", "G", 12.59, 14.5, 10.2, 5, 4, 0),
-    ("M92", "", "GC", 17.285, 43.14, 6.4, 14, 14, 0),
-    ("M93", "", "OC", 7.743, -23.85, 6.0, 22, 22, 0),
-    ("M94", "Cat's Eye Galaxy", "G", 12.848, 41.12, 8.2, 11, 9, 105),
-    ("M95", "", "G", 10.733, 11.7, 9.7, 7, 5, 0),
-    ("M96", "", "G", 10.78, 11.82, 9.2, 7, 5, 15),
-    ("M97", "Owl Nebula", "PN", 11.248, 55.02, 9.9, 3.4, 3.3, 0),
-    ("M98", "", "G", 12.23, 14.9, 10.1, 10, 3, 153),
-    ("M99", "", "G", 12.314, 14.42, 9.9, 5, 5, 0),
-    ("M100", "", "G", 12.382, 15.82, 9.3, 7, 6, 30),
-    ("M101", "Pinwheel Galaxy", "G", 14.053, 54.35, 7.9, 29, 27, 0),
-    ("M102", "Spindle Galaxy (NGC 5866)", "G", 15.108, 55.76, 9.9, 6, 3, 128),
-    ("M103", "", "OC", 1.555, 60.65, 7.4, 6, 6, 0),
-    ("M104", "Sombrero Galaxy", "G", 12.666, -11.62, 8.0, 9, 4, 90),
-    ("M105", "", "G", 10.797, 12.58, 9.3, 5, 5, 0),
-    ("M106", "", "G", 12.316, 47.3, 8.4, 19, 8, 150),
-    ("M107", "", "GC", 16.542, -13.05, 7.9, 13, 13, 0),
-    ("M108", "Surfboard Galaxy", "G", 11.192, 55.67, 10.0, 9, 2, 79),
-    ("M109", "", "G", 11.96, 53.37, 9.8, 8, 5, 23),
-    ("M110", "", "G", 0.673, 41.68, 8.5, 22, 11, 170),
-    # --- popular NGC / IC / Sh2 targets ---
-    ("NGC7000", "North America Nebula", "EN", 20.98, 44.33, 4.0, 120, 100, 0),
-    ("IC5070", "Pelican Nebula", "EN", 20.845, 44.35, 8.0, 60, 50, 0),
-    ("IC1396", "Elephant's Trunk region", "EN", 21.65, 57.5, 3.5, 170, 140, 0),
-    ("NGC2237", "Rosette Nebula", "EN", 6.533, 5.03, 9.0, 80, 60, 0),
-    ("IC434", "Horsehead region", "DN", 5.683, -2.45, 7.3, 60, 10, 0),
-    ("NGC2024", "Flame Nebula", "EN", 5.697, -1.85, 10.0, 30, 30, 0),
-    ("NGC1977", "Running Man Nebula", "RN", 5.592, -4.83, 7.0, 20, 10, 0),
-    ("NGC6960", "Western Veil", "SNR", 20.76, 30.72, 7.0, 70, 6, 15),
-    ("NGC6992", "Eastern Veil", "SNR", 20.94, 31.72, 7.0, 60, 8, 20),
-    ("NGC6888", "Crescent Nebula", "EN", 20.203, 38.35, 7.4, 18, 13, 0),
-    ("IC1318", "Butterfly Nebula (Sadr)", "EN", 20.367, 40.25, 7.0, 50, 30, 0),
-    ("IC1805", "Heart Nebula", "EN", 2.55, 61.45, 6.5, 60, 60, 0),
-    ("IC1848", "Soul Nebula", "EN", 2.85, 60.43, 6.5, 100, 50, 0),
-    ("NGC281", "Pacman Nebula", "EN", 0.88, 56.6, 7.4, 35, 30, 0),
-    ("NGC7635", "Bubble Nebula", "EN", 23.345, 61.2, 10.0, 15, 8, 0),
-    ("Sh2-155", "Cave Nebula", "EN", 22.95, 62.62, 7.7, 50, 30, 0),
-    ("NGC7380", "Wizard Nebula", "EN", 22.787, 58.1, 7.2, 25, 25, 0),
-    ("NGC1499", "California Nebula", "EN", 4.053, 36.62, 6.0, 145, 40, 160),
-    ("IC405", "Flaming Star Nebula", "EN", 5.27, 34.27, 6.0, 37, 19, 0),
-    ("IC443", "Jellyfish Nebula", "SNR", 6.28, 22.53, 12.0, 50, 40, 0),
-    ("IC2118", "Witch Head Nebula", "RN", 5.067, -7.23, 13.0, 180, 60, 30),
-    ("NGC2264", "Cone / Christmas Tree", "EN", 6.683, 9.9, 3.9, 40, 20, 0),
-    ("NGC2244", "Rosette Cluster", "OC", 6.53, 4.95, 4.8, 24, 24, 0),
-    ("NGC869", "h Persei", "OC", 2.32, 57.13, 3.7, 30, 30, 0),
-    ("NGC884", "Chi Persei", "OC", 2.373, 57.13, 3.8, 30, 30, 0),
-    ("NGC7293", "Helix Nebula", "PN", 22.494, -20.84, 7.6, 16, 12, 0),
-    ("NGC6543", "Cat's Eye Nebula", "PN", 17.976, 66.63, 8.1, 0.4, 0.3, 0),
-    ("NGC253", "Sculptor Galaxy", "G", 0.793, -25.29, 7.1, 27, 7, 52),
-    ("NGC891", "", "G", 2.376, 42.35, 10.0, 13, 3, 22),
-    ("NGC4565", "Needle Galaxy", "G", 12.606, 25.99, 9.6, 16, 2, 136),
-    ("NGC4631", "Whale Galaxy", "G", 12.703, 32.54, 9.2, 15, 3, 86),
-    ("NGC3628", "Hamburger Galaxy", "G", 11.338, 13.59, 9.5, 15, 4, 104),
-    ("NGC2403", "", "G", 7.614, 65.6, 8.4, 22, 12, 127),
-    ("NGC7331", "", "G", 22.62, 34.42, 9.5, 11, 4, 171),
-    ("NGC5128", "Centaurus A", "G", 13.425, -43.02, 6.8, 26, 20, 35),
-    ("NGC6946", "Fireworks Galaxy", "G", 20.58, 60.15, 8.8, 11, 10, 0),
-    ("NGC7023", "Iris Nebula", "RN", 21.027, 68.17, 7.1, 18, 18, 0),
-    ("NGC1333", "", "RN", 3.48, 31.35, 5.6, 6, 3, 0),
-    ("NGC2359", "Thor's Helmet", "EN", 7.307, -13.2, 11.5, 22, 18, 0),
-    ("NGC6823", "", "OC", 19.72, 23.3, 7.1, 12, 12, 0),
-    ("Sh2-101", "Tulip Nebula", "EN", 20.0, 35.32, 9.0, 16, 9, 0),
-    ("NGC6820", "", "EN", 19.712, 23.08, 9.0, 40, 30, 0),
-    ("NGC4038", "Antennae Galaxies", "G", 12.03, -18.87, 10.3, 5, 3, 0),
-    ("NGC3372", "Carina Nebula", "EN", 10.75, -59.87, 1.0, 120, 120, 0),
-    ("NGC6334", "Cat's Paw Nebula", "EN", 17.34, -35.98, 7.0, 40, 30, 0),
-    ("NGC6357", "Lobster Nebula", "EN", 17.44, -34.2, 8.0, 50, 40, 0),
-    ("B33", "Horsehead Nebula", "DN", 5.683, -2.46, 0, 6, 4, 0),
-    ("LDN1235", "Shark Nebula", "DN", 22.217, 73.4, 0, 60, 30, 0),
-    ("Mel15", "Heart Cluster", "OC", 2.543, 61.45, 6.5, 20, 20, 0),
-]
-
-
-def _build():
-    main = json.loads(DATA.read_text(encoding="utf-8"))["objects"] if DATA.exists() else []
-    for o in main:
-        o["src"] = "OpenNGC"
-    have = {o["id"] for o in main}
-    extra = [{"id": oid, "name": name, "type": typ, "ra": ra_h * 15.0, "dec": dec, "mag": mag,
-              "maj": maj, "min": mn, "pa": pa, "src": "manual"}
-             for oid, name, typ, ra_h, dec, mag, maj, mn, pa in _RAW if oid not in have]
-    return main + extra
-
-
-CATALOG = _build()
+CATALOG_DIR = Path(__file__).resolve().parent / "data" / "catalogs"
 
 TYPE_NAMES = {
     "G": "Galaxy", "GC": "Globular cluster", "OC": "Open cluster",
     "EN": "Emission nebula", "RN": "Reflection nebula", "PN": "Planetary nebula",
     "SNR": "Supernova remnant", "DN": "Dark nebula", "AST": "Asterism / star cloud",
 }
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+
+_lock = threading.Lock()
+_cache: dict = {"sig": None, "cats": []}
+
+
+def _signature():
+    files = sorted(CATALOG_DIR.glob("*.json")) if CATALOG_DIR.exists() else []
+    return tuple((f.name, f.stat().st_mtime_ns) for f in files)
+
+
+def catalogs() -> list[dict]:
+    """All catalogs (with objects), sorted by priority. Re-read when files change."""
+    with _lock:
+        sig = _signature()
+        if sig != _cache["sig"]:
+            cats = []
+            for name, _ in sig:
+                d = json.loads((CATALOG_DIR / name).read_text(encoding="utf-8"))
+                d.setdefault("id", Path(name).stem)
+                d.setdefault("priority", 50)
+                cats.append(d)
+            _cache.update(sig=sig, cats=sorted(cats, key=lambda c: (c["priority"], c["id"])))
+        return _cache["cats"]
+
+
+# ---------------------------------------------------------------- cross-catalog duplicates
+# The same nebula often appears under different ids (Sh2-117 = NGC 7000, Sh2-281 = M42). An object of a
+# lower-priority catalog is treated as the same object when it is close to one of a higher-priority catalog
+# (≤ max(5′, 20 % of the larger size)), the sizes differ at most 3× and the types are compatible.
+# It is then not shown separately; its id is added to the main object's `aka` list (searchable).
+# Catalogs with `"merge_by_position": false` (OpenNGC: neighbouring NGC/IC objects are distinct, e.g. M60 + NGC 4647)
+# are only de-duplicated by id.
+TYPE_GROUP = {"EN": "bright", "RN": "bright", "SNR": "bright", "PN": "bright", "DN": "dark",
+              "G": "G", "GC": "GC", "OC": "OC", "AST": "OC"}
+NO_MERGE = {"Sh2-103",   # Cygnus Loop – the whole loop, not just one Veil arc
+            "Sh2-277"}   # Flame Nebula – its catalogued position lies between NGC 2024 and IC 434
+
+
+def _sep_arcmin(a, b):
+    r = math.radians
+    c = (math.sin(r(a["dec"])) * math.sin(r(b["dec"]))
+         + math.cos(r(a["dec"])) * math.cos(r(b["dec"])) * math.cos(r(a["ra"] - b["ra"])))
+    return math.degrees(math.acos(max(-1.0, min(1.0, c)))) * 60
+
+
+def find_same(o, buckets):
+    """Best matching earlier object for o (or None). buckets: {int(dec): [objects]}."""
+    if o["id"] in NO_MERGE:
+        return None
+    best, g = None, TYPE_GROUP.get(o["type"])
+    for b in range(int(math.floor(o["dec"])) - 2, int(math.floor(o["dec"])) + 3):
+        for h in buckets.get(b, ()):
+            if TYPE_GROUP.get(h["type"]) != g:
+                continue
+            big, small = max(o["maj"], h["maj"]), max(1e-3, min(o["maj"], h["maj"]))
+            if big / small > 3:
+                continue
+            d = _sep_arcmin(o, h)
+            if d <= max(5.0, 0.2 * big):
+                score = d / big + 0.3 * math.log(big / small)
+                if best is None or score < best[0]:
+                    best = (score, h)
+    return best and best[1]
+
+
+_merge_cache: dict = {}
+
+
+def merged(hidden=()) -> tuple[list[dict], dict]:
+    """Objects of all visible catalogs, de-duplicated by id and by position; plus per-catalog stats."""
+    key = (_signature(), tuple(sorted(hidden)))
+    if key in _merge_cache:
+        return _merge_cache[key]
+    out, by_id, stats, buckets = [], {}, {}, {}
+    for c in catalogs():
+        st = stats.setdefault(c["id"], {"total": len(c["objects"]), "shown": 0, "duplicates": 0})
+        if c["id"] in hidden:
+            continue
+        added = []
+        for o in c["objects"]:
+            if o["id"] in by_id:
+                st["duplicates"] += 1
+                continue
+            same = find_same(o, buckets) if c.get("merge_by_position", True) else None
+            if same is not None:                       # same object under another id
+                same.setdefault("aka", []).append(o["id"])
+                if not same.get("name") and o.get("name"):
+                    same["name"] = o["name"]
+                by_id[o["id"]] = same
+                st["duplicates"] += 1
+                continue
+            obj = {**o, "cat": c["id"]}
+            out.append(obj); by_id[o["id"]] = obj; added.append(obj)
+            st["shown"] += 1
+        for obj in added:                              # only earlier catalogs are matched against
+            buckets.setdefault(int(math.floor(obj["dec"])), []).append(obj)
+    if len(_merge_cache) > 16:
+        _merge_cache.clear()
+    _merge_cache[key] = (out, stats)
+    return out, stats
+
+
+def resolve(oid: str):
+    """Object by id or alias (aka), among all catalogs."""
+    for o in all_objects():
+        if o["id"] == oid or oid in o.get("aka", ()):
+            return o
+    return None
+
+
+def summary(hidden=()) -> list[dict]:
+    _, stats = merged(hidden)
+    return [{k: c.get(k) for k in ("id", "name", "description", "source", "license", "priority", "builtin")}
+            | stats[c["id"]] | {"hidden": c["id"] in hidden} for c in catalogs()]
+
+
+# ---------------------------------------------------------------- import / delete
+def _num(v, default=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _angle(v, hours: bool) -> float:
+    """Degrees from 12.5 / '12.5' or sexagesimal '10:41:04.5' / '10 41 04.5' (RA sexagesimal = hours)."""
+    s = str(v).strip()
+    if re.search(r"[:\s]", s):
+        sign = -1 if s.startswith("-") else 1
+        parts = [float(p) for p in re.split(r"[:\s]+", s.lstrip("+-")) if p]
+        return sign * sum(p / 60 ** i for i, p in enumerate(parts)) * (15 if hours else 1)
+    return float(s)
+
+
+def normalise_object(o: dict) -> dict:
+    """Validate one imported object; raises ValueError with a readable message."""
+    oid = str(o.get("id", "")).strip()
+    if not oid:
+        raise ValueError("object without id")
+    typ = str(o.get("type") or "EN").strip().upper()
+    if typ not in TYPE_NAMES:
+        raise ValueError(f"{oid}: unknown type {typ!r} (allowed: {', '.join(TYPE_NAMES)})")
+    try:
+        ra, dec = _angle(o["ra"], hours=True), _angle(o["dec"], hours=False)
+    except (KeyError, ValueError):
+        raise ValueError(f"{oid}: missing or invalid ra/dec")
+    if not (0 <= ra < 360 and -90 <= dec <= 90):
+        raise ValueError(f"{oid}: coordinates out of range")
+    maj = _num(o.get("maj"), 1.0) or 1.0
+    return {"id": oid, "name": str(o.get("name") or ""), "type": typ, "ra": round(ra % 360, 5), "dec": round(dec, 5),
+            "mag": _num(o.get("mag")), "maj": maj, "min": _num(o.get("min"), maj) or maj, "pa": _num(o.get("pa"))}
+
+
+def parse_upload(text: str, filename: str = "") -> list[dict]:
+    """JSON (list of objects, or a catalog document with "objects") or CSV with a header row
+    id,name,type,ra,dec,mag,maj,min,pa (separated by ',', ';' or tab). RA: degrees or h:m:s."""
+    if filename.lower().endswith(".json") or text.lstrip().startswith(("{", "[")):
+        d = json.loads(text)
+        rows = d["objects"] if isinstance(d, dict) else d
+    else:
+        dialect = csv.Sniffer().sniff(text.split("\n", 1)[0], delimiters=",;\t")
+        rows = [{(k or "").strip().lower(): (v or "").strip() for k, v in r.items()}
+                for r in csv.DictReader(io.StringIO(text), dialect=dialect)]
+    objs = [normalise_object(r) for r in rows]
+    if not objs:
+        raise ValueError("no objects found")
+    return objs
+
+
+def save_catalog(meta: dict, objects: list[dict]) -> dict:
+    cid = meta["id"]
+    if not ID_RE.match(cid):
+        raise ValueError("catalog id: lowercase letters, digits, '-' or '_' (max 40 characters)")
+    doc = {"id": cid, "name": meta.get("name") or cid, "priority": int(meta.get("priority") or 50),
+           "builtin": False, "description": meta.get("description", ""), "source": meta.get("source") or "imported",
+           "license": meta.get("license", ""), "objects": objects}
+    CATALOG_DIR.mkdir(parents=True, exist_ok=True)
+    (CATALOG_DIR / f"{cid}.json").write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return doc
+
+
+def delete_catalog(cid: str) -> bool:
+    p = CATALOG_DIR / f"{cid}.json"
+    if not ID_RE.match(cid) or not p.exists():
+        return False
+    p.unlink()
+    return True
+
+
+def all_objects() -> list[dict]:
+    """Every object of every catalog (hidden ones too) – for scripts such as download_images.py."""
+    return merged()[0]

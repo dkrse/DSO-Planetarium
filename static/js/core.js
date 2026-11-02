@@ -5,9 +5,29 @@ export const $ = (id) => document.getElementById(id);
 export const fmtT = (d) => d ? new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—';
 
 // ---------------------------------------------------------------- state
+// UI preferences: localStorage + a copy on the server (settings.ui, see boot.js); every change is synced
+const LEGACY = new Set(['setups', 'activeSetup', 'custom', 'sensor', 'focal', 'rot']);   // moved to the server DB
+let uiTimer = 0;
+export function syncUi() {
+  clearTimeout(uiTimer);
+  uiTimer = setTimeout(() => {
+    const ui = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k.startsWith('dso.') && !LEGACY.has(k.slice(4))) ui[k.slice(4)] = JSON.parse(localStorage.getItem(k));
+      }
+    } catch { return; }
+    fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ui }) })
+      .catch((e) => console.warn('UI settings not saved on the server', e));
+  }, 600);
+}
 export const store = {
   get(k, d) { try { const v = localStorage.getItem('dso.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('dso.' + k, JSON.stringify(v)); } catch { } },
+  set(k, v) {
+    try { if (localStorage.getItem('dso.' + k) === JSON.stringify(v)) return; localStorage.setItem('dso.' + k, JSON.stringify(v)); } catch { }
+    syncUi();
+  },
 };
 export const S = {
   lat: store.get('lat', 48.1486), lon: store.get('lon', 17.1077),

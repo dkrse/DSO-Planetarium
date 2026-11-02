@@ -1,5 +1,8 @@
+import { select } from './panels.js';
+import { loadPerf } from './perf.js';
+import { isSettingsOpen } from './dialog.js';
 import * as THREE from 'three';
-import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { LabelObject, LabelRenderer } from './labels.js';
 import { D2R, altaz, jd, lstDeg, moonIllum, moonRaDec, planets, precess, precessionMatrix, sunRaDec } from '../astro.js';
 import { $, R, S, active } from './core.js';
 import { frameGeom, hitFrame, m360, pointerRaDec, toPlane, viewCenter, zenithPA } from './framing.js';
@@ -10,16 +13,19 @@ import { setSilhouetteColor } from './horizon.js';
 
 // ---------------------------------------------------------------- scene
 export let sky;
-export const renderer = new THREE.WebGLRenderer({ antialias: true });
+// context options come from Settings › Performance (GPU preference, antialiasing)
+const perf = loadPerf();
+export const renderer = new THREE.WebGLRenderer({ antialias: perf.aa, powerPreference: perf.gpu });
 
-export const labelR = new CSS2DRenderer();
-// zIndex creates a stacking context: CSS2DRenderer gives each label z-index up to ~1000,
-// which would otherwise paint labels over the UI panels
+export const labelR = new LabelRenderer();
+// label layer: its own stacking context (zIndex 1) keeps all labels below the UI panels
 
 export const scene = new THREE.Scene();
 export const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
 
-export const view = { yaw: Math.PI, pitch: 25 * D2R }; // looking south
+// view: alt-az (zenith up, yaw/pitch) or equatorial (celestial north up, centre in RA/Dec J2000 – the sky
+// then stays fixed while time runs, like through a tracking equatorial mount)
+export const view = { yaw: Math.PI, pitch: 25 * D2R, mode: 'altaz', ra: 0, dec: 0 }; // looking south
 
 export const eqGroup = new THREE.Group();            // equatorial frame, J2000
 
@@ -33,7 +39,7 @@ export function label(text, cls, onClick) {
   el.className = cls; el.textContent = text;
   el.dataset.pad = '';
   if (onClick) el.addEventListener('pointerup', (e) => { if (!drag.moved) { e.stopPropagation(); onClick(); } });
-  return new CSS2DObject(el);
+  return new LabelObject(el);
 }
 // standard placement: to the right of the object, offset by its on-screen radius
 export function rightOf(lbl) { lbl.center.set(0, 0.5); return lbl; }
@@ -43,7 +49,7 @@ export function padLabel(lbl, px) {
 }
 
 // ground + horizon
-export let ground;
+export let ground, horizonRing;
 
 export const ringPts = []; 
 
@@ -57,16 +63,18 @@ export const eqGrid = new THREE.Group();
 export const gridLabels = [];
 
 // Sun + Moon
+// a disc sprite is solid up to DISC × its radius, then fades (thin glow)
+export const DISC = 0.8;
 export function disc(color, size) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gr.addColorStop(0, color); gr.addColorStop(0.45, color); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  gr.addColorStop(0, color); gr.addColorStop(DISC, color); gr.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthWrite: false, blending: THREE.AdditiveBlending }));
   s.scale.setScalar(size); return s;
 }
 export const sun = disc('#fff3c0', 3), moon = disc('#e8eef8', 2.2);
-export const sunL = label('Sun', 'sm'), moonL = label('Moon', 'sm');
+export const sunL = label('Sun', 'sm', () => select('P:Sun', true)), moonL = label('Moon', 'sm', () => select('P:Moon', true));
    
 
 // ---------------------------------------------------------------- sky orientation
@@ -112,9 +120,53 @@ export function startDrag(e, mode) {
 
 export const _q = new THREE.Quaternion();
 
+const _invEq = new THREE.Matrix4(), _t = new THREE.Vector3(), _up = new THREE.Vector3();
+/** Static objects: compute their local matrix once and stop three.js from recomposing it every frame
+ *  (≈ 15 000 objects inside the equatorial group). Change position/scale later → call updateMatrix(). */
+export function freeze(obj) { obj.traverse((o) => { o.updateMatrix(); o.matrixAutoUpdate = false; }); }
+
+/** Only visible children get their world matrix updated when the group moves (three.js updates all of them,
+ *  also thousands of hidden / off-screen objects). Code that shows a child again must call
+ *  child.updateMatrixWorld(true) (getWorldPosition() also refreshes the object itself). */
+export function updateVisibleChildren(group) {
+  group.updateMatrixWorld = function (force) {
+    if (this.matrixAutoUpdate) this.updateMatrix();
+    if (this.matrixWorldNeedsUpdate || force) {
+      if (this.parent) this.matrixWorld.multiplyMatrices(this.parent.matrixWorld, this.matrix);
+      else this.matrixWorld.copy(this.matrix);
+      this.matrixWorldNeedsUpdate = false; force = true;
+    }
+    for (const c of this.children) if (c.visible) c.updateMatrixWorld(force);
+  };
+}
+
 export function aimAt(world) {
   view.yaw = Math.atan2(-world.x, -world.z);
   view.pitch = Math.asin(world.y / world.length());
+  const e = _t.copy(world).normalize().applyMatrix4(_invEq.copy(eqGroup.matrix).invert());   // eqGroup has no parent transform
+  view.ra = ((Math.atan2(e.y, e.x) / D2R) + 360) % 360;
+  view.dec = Math.asin(Math.max(-1, Math.min(1, e.z))) / D2R;
+}
+export const aimAltAz = (alt, az) => aimAt(hzVec(alt, az, 1));
+
+/** Orient the camera for the current view mode (called every frame). */
+export function applyView() {
+  if (view.mode === 'eq') {
+    const dec = Math.max(-89.9, Math.min(89.9, view.dec));
+    _t.copy(eqVec(view.ra, dec, 1)).applyMatrix4(eqGroup.matrix);
+    _up.set(0, 0, 1).transformDirection(eqGroup.matrix);          // celestial north up
+    camera.up.copy(_up); camera.lookAt(_t);
+  } else {
+    camera.up.set(0, 1, 0); camera.rotation.set(view.pitch, view.yaw, 0);
+  }
+}
+/** Switch view mode keeping the current view direction. */
+export function setViewMode(mode) {
+  updateSky();                                                      // sky orientation for the current time
+  const d = view.mode === 'eq' ? eqVec(view.ra, view.dec, 1).applyMatrix4(eqGroup.matrix)
+    : new THREE.Vector3(-Math.sin(view.yaw) * Math.cos(view.pitch), Math.sin(view.pitch), -Math.cos(view.yaw) * Math.cos(view.pitch));
+  view.mode = mode; aimAt(d);
+  if (mode === 'altaz') view.pitch = Math.max(-0.2, Math.min(Math.PI / 2 - 1e-4, view.pitch));
 }
 export function setFov(f) { camera.fov = f; camera.updateProjectionMatrix(); }
 
@@ -129,19 +181,23 @@ export function resize() {
 // module setup – called once from main.js after all modules are loaded
 export function init() {
   sky = $('sky');
-  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setPixelRatio(devicePixelRatio * perf.scale);
   sky.appendChild(renderer.domElement);
   Object.assign(labelR.domElement.style, { position: 'absolute', top: 0, left: 0, zIndex: 1 });
+  labelR.domElement.id = 'labelLayer';
   sky.appendChild(labelR.domElement);
   camera.rotation.order = 'YXZ';
   eqGroup.matrixAutoUpdate = false;
+  updateVisibleChildren(eqGroup);
+  scene.matrixWorldAutoUpdate = false;           // the render loop updates matrices itself (once per frame)
   scene.add(eqGroup);
   ground = new THREE.Mesh(
     new THREE.SphereGeometry(R * 0.97, 64, 16, 0, Math.PI * 2, Math.PI / 2 + 0.0005, Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0x0b0f0a, side: THREE.BackSide }));
   scene.add(ground);
   for (let a = 0; a <= 360; a += 2) ringPts.push(hzVec(0, a, R * 0.96));
-  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ringPts), new THREE.LineBasicMaterial({ color: 0x8a6a2a })));
+  horizonRing = new THREE.Line(new THREE.BufferGeometry().setFromPoints(ringPts), new THREE.LineBasicMaterial({ color: 0x8a6a2a }));
+  scene.add(horizonRing);
   [['N', 0], ['E', 90], ['S', 180], ['W', 270], ['NE', 45], ['SE', 135], ['SW', 225], ['NW', 315]].forEach(([t, a]) => {
     const l = label(t, 'card'); l.position.copy(hzVec(1.5, a, R * 0.95)); if (t.length > 1) l.element.style.fontSize = '11px'; scene.add(l);
   });
@@ -172,13 +228,19 @@ export function init() {
       eqGrid.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(p), d === 0 ? mEq : m));
       if (d) { const l = label(`${d > 0 ? '+' : ''}${d}°`, 'glbl'); l.position.copy(eqVec(0, d, R * 0.99)); eqGrid.add(l); gridLabels.push(l); }
     }
+    freeze(eqGrid);
   }
   rightOf(sunL);
   rightOf(moonL);
   sun.add(sunL);
   moon.add(moonL);
   eqGroup.add(sun, moon);
-  overlay.addEventListener('pointerdown', (e) => startDrag(e, hitFrame(e) ? 'frame' : 'sky'));
+  overlay.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();                                  // no text selection / native drag while panning
+    startDrag(e, hitFrame(e) ? 'frame' : 'sky');
+  });
+  overlay.addEventListener('dragstart', (e) => e.preventDefault());
   addEventListener('pointerup', () => { drag.on = false; setTimeout(() => drag.moved = false, 0); });
   addEventListener('pointermove', (e) => {
     if (!drag.on) { if (e.target === overlay) overlay.style.cursor = hitFrame(e) ? 'move' : 'default'; return; }
@@ -197,12 +259,17 @@ export function init() {
       const pa = m360(Math.round(Math.atan2(xi, eta) / D2R * 2) / 2), st = active();
       st.rot = (st.mount ?? 'eq') === 'eq' ? pa : m360(Math.round((zenithPA(g.ra, g.dec) - pa) * 2) / 2);
       saveSetups(); updateFovInfo();
-      if ($('eqDlg').open) renderDlg();
+      if (isSettingsOpen('equipment')) renderDlg();
       return;
     }
     if (drag.moved) S.track = false;
     const k = camera.fov * D2R / sky.clientHeight;
-    view.yaw += dx * k; view.pitch = Math.max(-0.2, Math.min(Math.PI / 2, view.pitch + dy * k));
+    if (view.mode === 'eq') {          // north up, east left: drag right → view moves east (+RA)
+      view.ra = ((view.ra + dx * k / D2R / Math.max(0.05, Math.cos(view.dec * D2R))) % 360 + 360) % 360;
+      view.dec = Math.max(-89.9, Math.min(89.9, view.dec + dy * k / D2R));
+    } else {
+      view.yaw += dx * k; view.pitch = Math.max(-0.2, Math.min(Math.PI / 2, view.pitch + dy * k));
+    }
   });
   overlay.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -210,9 +277,28 @@ export function init() {
     camera.updateProjectionMatrix();
   }, { passive: false });
   document.querySelectorAll('[data-look]').forEach((b) => b.onclick = () => {
-    S.track = false; view.yaw = -b.dataset.look * D2R; view.pitch = 25 * D2R; setFov(Math.max(camera.fov, 70));
+    S.track = false; aimAltAz(25, +b.dataset.look); setFov(Math.max(camera.fov, 70));
   });
-  $('zenith').onclick = () => { S.track = false; view.pitch = Math.PI / 2 - 1e-4; setFov(Math.max(camera.fov, 100)); };
+  // keyboard: arrows pan (10 % of the view, Shift = 2 %), + / − zoom
+  addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName) || document.querySelector('dialog[open]')) return;
+    const step = camera.fov * (e.shiftKey ? 0.02 : 0.1);              // degrees
+    const dx = { ArrowLeft: 1, ArrowRight: -1 }[e.key] ?? 0, dy = { ArrowUp: 1, ArrowDown: -1 }[e.key] ?? 0;
+    if (dx || dy) {
+      e.preventDefault(); S.track = false;
+      if (view.mode === 'eq') {          // north up, east left
+        view.ra = ((view.ra + dx * step / Math.max(0.05, Math.cos(view.dec * D2R))) % 360 + 360) % 360;
+        view.dec = Math.max(-89.9, Math.min(89.9, view.dec + dy * step));
+      } else {
+        view.yaw += dx * step * D2R;
+        view.pitch = Math.max(-0.2, Math.min(Math.PI / 2, view.pitch + dy * step * D2R));
+      }
+      return;
+    }
+    const z = { '+': 1 / 1.25, '=': 1 / 1.25, '-': 1.25, '_': 1.25 }[e.key];
+    if (z) { e.preventDefault(); setFov(Math.max(0.15, Math.min(110, camera.fov * z))); }
+  });
+  $('zenith').onclick = () => { S.track = false; aimAltAz(89.99, view.yaw ? -view.yaw / D2R : 180); setFov(Math.max(camera.fov, 100)); };
   $('pole').onclick = () => {
     S.track = false; scene.updateMatrixWorld();
     aimAt(eqVec(0, S.lat >= 0 ? 90 : -90).applyMatrix4(eqGroup.matrixWorld)); setFov(Math.min(Math.max(camera.fov, 30), 60));

@@ -4,7 +4,8 @@
 Source: NASA SkyView – DSS2 Red + DSS2 Blue, the color image is composed locally
 (R = red, G = (red+blue)/2, B = blue, background subtracted). Covers the whole sky.
 
-    python tools/download_images.py                    # whole catalog
+    python tools/download_images.py --catalog openngc  # one catalog (ids: see Settings › Catalogs)
+    python tools/download_images.py                    # every catalog (≈ 3 800 objects, several hundred MB)
     python tools/download_images.py --only M31 M42 --force --px 1024
 Existing files (including your own photos) are not overwritten without --force.
 Requires: pip install pillow numpy
@@ -22,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app.catalog import CATALOG                    # noqa: E402
+from app.catalog import all_objects                # noqa: E402
 from app.images import IMAGES, find, image_fov      # noqa: E402
 
 SKYVIEW = "https://skyview.gsfc.nasa.gov/current/cgi/runquery.pl"
@@ -65,12 +66,14 @@ def make(o, px):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--px", type=int, default=800)
-    ap.add_argument("--only", nargs="*")
+    ap.add_argument("--only", nargs="*", help="object ids")
+    ap.add_argument("--catalog", nargs="*", help="catalog ids, e.g. openngc sharpless (default: all)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--workers", type=int, default=3)
     a = ap.parse_args()
     IMAGES.mkdir(exist_ok=True)
-    objs = [o for o in CATALOG if (not a.only or o["id"] in a.only) and (a.force or not find(o["id"]))]
+    objs = [o for o in all_objects() if (not a.only or o["id"] in a.only) and (not a.catalog or o["cat"] in a.catalog)
+            and (a.force or not find(o["id"]))]
     print(f"Downloading {len(objs)} objects…", flush=True)
 
     def one(o):

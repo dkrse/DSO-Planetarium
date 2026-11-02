@@ -1,6 +1,6 @@
 import { altaz, jd, lstDeg, sunRaDec } from '../astro.js';
 import { $, S } from './core.js';
-import { drawChart, loadVisibility, renderTable, renderTableSoon } from './panels.js';
+import { drawChart, loadVisibility, renderTable, renderTableSoon, updateTableTime } from './panels.js';
 
 // ---------------------------------------------------------------- time
 export function setWindowFromDate(dateStr) {
@@ -43,7 +43,7 @@ export function drawNightBar() {
 
 // module setup – called once from main.js after all modules are loaded
 export function init() {
-  $('slider').oninput = () => { S.time = new Date(S.windowStart.getTime() + $('slider').value * 60000); renderTableSoon(); drawChart(); };
+  $('slider').oninput = () => { S.time = new Date(S.windowStart.getTime() + $('slider').value * 60000); updateTableTime(); drawChart(); };
   $('now').onclick = () => { S.time = new Date(); syncSlider(); renderTable(); drawChart(); };
   $('play').onclick = () => { S.playing = !S.playing; $('play').textContent = S.playing ? '❚❚' : '▶'; };
   $('date').onchange = () => { if ($('date').value) changeDate($('date').value); };

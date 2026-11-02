@@ -42,7 +42,8 @@ def meta(obj: dict, path: Path) -> dict:
 def index(catalog) -> dict:
     out = {}
     for o in catalog:
-        p = find(o["id"])
+        # an image may be stored under the object id or one of its aliases (e.g. M102.jpg for NGC 5866)
+        p = next(filter(None, (find(i) for i in [o["id"], *o.get("aka", [])])), None)
         if p:
-            out[o["id"]] = {**meta(o, p), "v": int(p.stat().st_mtime)}
+            out[o["id"]] = {**meta(o, p), "v": int(p.stat().st_mtime), "file": p.stem}
     return out

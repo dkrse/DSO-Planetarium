@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build app/data/catalog.json from OpenNGC (https://github.com/mattiaverga/OpenNGC, CC-BY-SA-4.0).
+"""Build app/data/catalogs/openngc.json from OpenNGC (https://github.com/mattiaverga/OpenNGC, CC-BY-SA-4.0).
 
 Selection for astrophotography: all Messier objects, objects brighter than --mag, larger than --size,
 or with a common name. Duplicates, single stars and non-existent entries are dropped.
 
-    python tools/build_catalog.py                       # downloads NGC.csv + addendum.csv
+    python tools/build_catalog.py                       # main catalog: Messier, ≤ 11 mag, ≥ 8′ or named
+    python tools/build_catalog.py --faint               # second catalog: objects between 11 and 13 mag
     python tools/build_catalog.py --src /path/to/OpenNGC/database_files --mag 11 --size 8
 """
 import argparse
@@ -16,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "app" / "data" / "catalog.json"
+OUT_DIR = ROOT / "app" / "data" / "catalogs"
 BASE = "https://raw.githubusercontent.com/mattiaverga/OpenNGC/master/database_files/"
 
 TYPE_MAP = {
@@ -67,6 +68,9 @@ def main():
     ap.add_argument("--src", help="local OpenNGC database_files directory (default: download)")
     ap.add_argument("--mag", type=float, default=11.0, help="include objects brighter than this")
     ap.add_argument("--size", type=float, default=8.0, help="include objects larger than this [arcmin]")
+    ap.add_argument("--faint", action="store_true",
+                    help="build the 'openngc_faint' catalog: only objects with --mag < mag ≤ --faint-mag")
+    ap.add_argument("--faint-mag", type=float, default=13.0)
     a = ap.parse_args()
 
     rows = []
@@ -82,7 +86,11 @@ def main():
         mag = num(r["V-Mag"]) or num(r["B-Mag"])
         maj, mn = num(r["MajAx"]), num(r["MinAx"])
         common = [n.strip() for n in r["Common names"].split(",") if n.strip()]
-        if not (messier or (mag is not None and mag <= a.mag) or (maj or 0) >= a.size or common):
+        main_sel = messier or (mag is not None and mag <= a.mag) or (maj or 0) >= a.size or common
+        if a.faint:
+            if main_sel or mag is None or mag > a.faint_mag:    # only what the main catalog leaves out
+                continue
+        elif not main_sel:
             continue
         if r["Name"] in SKIP:
             continue
@@ -99,10 +107,21 @@ def main():
         })
 
     out.sort(key=lambda o: (not o["id"].startswith("M"), o["id"][:1], int(re.sub(r"\D", "", o["id"]) or 0), o["id"]))
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    if a.faint:
+        meta = {"id": "openngc_faint", "name": f"OpenNGC faint ({a.mag:g}–{a.faint_mag:g} mag)", "priority": 15,
+                "description": f"Fainter NGC / IC objects, {a.mag:g} < mag ≤ {a.faint_mag:g} – mostly galaxies; "
+                               "reachable with stacking, e.g. with a Seestar or a small refractor."}
+    else:
+        meta = {"id": "openngc", "name": "OpenNGC (NGC / IC / Messier)", "priority": 10,
+                "description": f"NGC and IC objects incl. all Messier objects, selected for astrophotography "
+                               f"(≤ {a.mag:g} mag, ≥ {a.size:g}′ or named)."}
+    OUT = OUT_DIR / f"{meta['id']}.json"
     OUT.write_text(json.dumps({
+        **meta, "builtin": True, "merge_by_position": False,   # neighbouring NGC/IC objects are distinct
         "source": "OpenNGC by Mattia Verga, https://github.com/mattiaverga/OpenNGC",
-        "license": "CC-BY-SA-4.0", "selection": {"mag": a.mag, "size_arcmin": a.size},
+        "license": "CC-BY-SA-4.0",
+        "selection": {"mag": a.mag, "size_arcmin": a.size, **({"faint_mag": a.faint_mag} if a.faint else {})},
         "objects": out}, ensure_ascii=False, separators=(",", ":")))
     print(f"{len(out)} objects → {OUT}  (Messier: {sum(o['id'].startswith('M') and o['id'][1:].isdigit() for o in out)})")
 

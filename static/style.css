@@ -167,3 +167,47 @@ details.planets td,details.planets th{padding:2px 4px;position:static}
 body{display:flex;flex-direction:column}
 main{flex:1;min-height:0;height:auto}
 #detail canvas{height:170px}
+.catBody{padding:10px 16px;display:flex;flex-direction:column;gap:10px;max-height:70vh;overflow:auto}
+#catList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+#catList li{display:flex;gap:10px;align-items:flex-start;padding:6px;border:1px solid var(--line);border-radius:6px}
+#catList .catInfo{flex:1;display:flex;flex-direction:column;gap:1px;min-width:0}
+#catList small{font-size:12px}
+.dim{color:var(--dim)}
+.catShow input{width:16px;height:16px;margin-top:2px}
+.ciGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;width:100%}
+.ciGrid label{display:flex;gap:6px}.ciGrid label input{flex:1;min-width:0}
+.ciGrid .wide{grid-column:1/-1}
+#catDlg{width:min(820px,96vw)}
+#setDlg{width:min(860px,96vw)}
+.tabsHead{display:flex;align-items:flex-end;gap:16px;padding:0 16px;border-bottom:1px solid var(--line)}
+.tabsHead h2{border:0;padding:12px 0}
+.tabs{display:flex;gap:2px}
+.tabs button{border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;background:transparent;color:var(--dim);padding:7px 14px}
+.tabs button[aria-selected="true"]{background:var(--panel);border-color:var(--line);color:var(--text);margin-bottom:-1px;padding-bottom:8px}
+.tabPanel{min-height:420px;max-height:70vh;overflow:auto}
+.tabPanel[hidden]{display:none}
+.objBody{padding:10px 16px;display:flex;flex-direction:column;gap:10px}
+.typeGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px 14px;width:100%}
+.typeGrid label{gap:6px}
+.eqFoot{padding:0 16px 10px;justify-content:flex-end;display:flex}
+/* stable widths: changing values must not re-wrap the toolbar */
+#starMagV{display:inline-block;width:2.2em;text-align:left;font-variant-numeric:tabular-nums}
+#hud{font-variant-numeric:tabular-nums}
+#list tr.more td{text-align:center;padding:8px}
+.ok{color:var(--good)}
+#setDlg .objBody fieldset{flex-direction:column;align-items:flex-start}
+.note{background:transparent;border:1px dashed var(--warn);color:var(--warn);font-size:12px}
+/* inverted colours: white sky, black stars; hue-rotate keeps the object-type colours recognisable */
+#sky.inverted canvas, #sky.inverted #labelLayer{filter:invert(1) hue-rotate(180deg)}
+.sm{cursor:pointer;pointer-events:auto}
+#list tr.body td{background:color-mix(in srgb, var(--accent2) 8%, transparent)}
+/* the sky is a drawing surface: dragging must never select label text */
+#sky, #sky *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+#sky input, #sky select{-webkit-user-select:auto;user-select:auto}
+#toolbar button.on{border-color:var(--accent);color:var(--accent)}
+#framing[hidden]{display:none}
+/* view controls in the header */
+#navbar{display:flex;gap:3px;align-items:center;flex-wrap:nowrap}
+#navbar button{padding:3px 7px}
+#navbar button.on{border-color:var(--accent);color:var(--accent)}
+#navbar select{padding:3px 4px}

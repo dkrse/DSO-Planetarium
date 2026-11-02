@@ -5,6 +5,96 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.0] – 2026-11-02
+
+Manageable catalogs, much faster rendering, settings with tabs, view modes, Sun and Moon search.
+
+### Added
+- README screenshots of the view modes (Equatorial / Alt/Az) and of the inverted chart with a Seestar S50 Pro frame;
+  outdated screenshots of the old layout removed.
+- Keyboard navigation: arrow keys pan the sky by 10 % of the view (Shift: 2 %), + / − zoom; works in both view modes.
+**Catalogs**
+- Catalog management: every catalog is a separate file in `app/data/catalogs/`; Settings › Catalogs shows / hides
+  catalogs (stored on the server as `hidden_catalogs`), imports new ones from CSV or JSON and deletes them.
+  Objects are merged by id with a per-catalog priority. API: `GET/POST /api/catalogs`, `DELETE /api/catalogs/{id}`.
+- Sharpless (313 HII regions) and Barnard (349 dark nebulae) catalogs, built from CDS VizieR by `tools/build_vizier.py`,
+  with common names for well-known objects.
+- "OpenNGC faint" catalog: 2 143 NGC/IC objects between 11 and 13 mag (1 847 galaxies), for stacked imaging
+  with small telescopes such as the Seestar; built with `tools/build_catalog.py --faint`.
+- Cross-catalog duplicates by position: an object of a lower-priority catalog lying on a higher-priority one
+  (similar size, compatible type) is merged into it; its id becomes a searchable alias (`aka`), e.g. Sh2-117 → NGC 7000.
+  OpenNGC catalogs are de-duplicated by id only (neighbouring NGC/IC objects are distinct).
+- Catalog filter in the object table; the object detail shows the catalog and aliases.
+
+**Sky and objects**
+- View modes (toolbar "View"): **Alt/Az** — zenith up, horizon level; **Equatorial** — celestial north up, east left,
+  dragging moves in RA/Dec and the sky stays fixed while time runs (like a tracking EQ mount). "Grid" draws the grid
+  of the current mode.
+- Visible object types (Settings › Objects), stored on the server as `hidden_types` and applied to the API as well.
+- Density control: at wide views only objects large on screen or bright enough are drawn (Messier objects, the selection
+  and saved targets always); more appear when zooming in.
+- Inverted colours (toolbar "Invert", shortcut **I**): white sky, black stars and outlines, negative images —
+  a GPU filter on the sky only; object-type colours stay recognisable.
+- Sun and Moon can be searched and selected like planets (search box, click on their label, "Sun, Moon & planets" table):
+  detail with magnitude, true size, illumination, rise / transit / set, disc size on the sensor and the altitude chart.
+  Searching also lists matching planets above the deep-sky results.
+
+- All settings are saved and restored on the next start: UI preferences (display toggles, theme, view mode, filters,
+  performance, panels, …) are kept in the browser *and* on the server (`settings.ui`), so they also survive another
+  browser, a private window or cleared site data. `static/js/boot.js` loads them before the app starts.
+- Settings › Display tab with the display toggles (grid, horizon, invert, stars, magnitude, star names, constellations,
+  planets, labels, images). The view controls — N / E / S / W, Zenith, Pole, ▭ Framing and the Alt/Az ↔ Eq selector —
+  are in the header; nothing floats over the sky except the time HUD.
+- The app is labelled "DSO" (header and page title).
+- The framing & mosaic panel is hidden until turned on with the ▭ Framing button (shortcut **F**); the FOV frame
+  itself is always drawn.
+- "Horizon" toggle: hides the ground, horizon line and horizon profile; objects below the horizon are then shown too.
+- Closing the object detail (✕) or pressing **Esc** clears the selection and the FOV frame follows the view again
+  (selecting an object anchors the frame on it).
+- The header shows the mount type of the active setup (EQ / Alt-Az).
+
+**Settings and equipment**
+- Settings dialog with tabs — Display, Objects, Catalogs, Horizon, Equipment, Performance — one ⚙ Settings… button
+  instead of three separate dialogs.
+- Settings › Performance: rendering mode (Hardware GPU / Software CPU), GPU preference (dedicated / integrated),
+  resolution scale, antialiasing, frame-rate cap; shows the renderer the browser reports.
+  On a software renderer the software preset is chosen automatically on first run.
+- Seestar S50 and S50 Pro presets set sensor, focal length, aperture and the alt-az mount
+  (S50: 5.57 × 3.13 mm, 250 mm → 1.28° × 0.72°; S50 Pro: 11.14 × 6.26 mm, 260 mm → 2.45° × 1.38°).
+- Notice above the object table when object types or catalogs are hidden in the settings.
+- `window.__dso` debugging handle (app state, scene, renderer).
+
+### Changed
+- Performance: the sky is rendered on demand (after input, data changes or during playback; 1 frame/s otherwise)
+  instead of continuously at 60 fps.
+- Performance: own lightweight label layer (`static/js/labels.js`) instead of three.js CSS2DRenderer, which re-styled,
+  sorted and re-indexed all ~5 500 labels every frame; the new layer skips hidden subtrees and writes to the DOM only on change.
+- Performance: objects outside the view are hidden completely (no draw call, no matrix update); the object table
+  renders 300 rows at a time ("Show more…"); HUD text is updated only when it changes.
+- Performance: static objects have frozen local matrices and only visible subtrees of the equatorial group get their
+  world matrix updated (three.js recomputed ~15 000 matrices every frame); the renderer no longer traverses the scene twice.
+  Frame CPU time while dragging: ~16 ms → ~4 ms.
+- Performance: moving the time slider / playback only refreshes the altitude cells of the table (precession cached
+  per night) instead of rebuilding it (25 ms → < 2 ms); search and filters are debounced.
+- Performance: server-side visibility is computed with NumPy for all objects at once (1–2 s → 0.15 s, identical results)
+  and cached; responses are gzip-compressed (visibility 1.1 MB → 107 kB). Loading a night: ~1.2 s → ~0.14 s.
+- Optional profiling: `window.__dso.prof = {}` collects the time spent in each part of a frame.
+- Sun, Moon and planets are drawn as crisp discs at their true angular size.
+- `app/data/catalog.json` → `app/data/catalogs/openngc.json`; the hand-made fallback list moved to `catalogs/extras.json`.
+- New dependency `python-multipart` (file upload).
+
+### Fixed
+- Sun and Moon were drawn about 3× too large (fixed 1.7° sprites), so they seemed not to fit into a FOV frame.
+- Number fields in the settings rejected values such as 5.57 (fixed `step`) and blocked closing the dialog.
+- Moving the star-magnitude slider made the toolbar re-wrap and jump.
+- Dragging the sky selected (highlighted) label text when many labels were under the mouse.
+- The camera frame disappeared while panning (regression of the matrix optimisation: the frame is rebuilt after the
+  per-frame matrix update and was drawn with stale matrices).
+- Arrow keys did nothing after switching Alt/Az ↔ Eq: the header select kept the focus (and the arrows would
+  even switch it back). Header and time-bar selects now release the focus after a choice.
+- After an update the browser could mix new and cached old JS modules ("core.syncUi is not a function");
+  static files are now served with `Cache-Control: no-cache` (revalidated via ETag, unchanged files → 304).
+
 ## [0.2.0] – 2026-11-02
 
 Accuracy, OpenNGC catalog, framing & mosaics, server-side setups and targets, custom horizon.
