@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Slow-frame log: frames taking more than 40 ms are recorded with a per-part breakdown in `window.__dso.slow`.
+
+### Fixed
+- Pressing the mouse in the middle of the sky grabbed the camera frame (which follows the view there) instead of
+  panning; the frame can now be dragged / rotated only while the ▭ Framing panel is open.
+- Panning stuttered with inverted colours (95th-percentile frame 37 ms instead of 20 ms): the CSS filter was also
+  applied to the label layer, so hundreds of labels were re-rasterised every frame. Only the WebGL canvas is filtered
+  now; labels get inverted colours directly.
+
 ## [0.3.0] – 2026-11-02
 
 Manageable catalogs, much faster rendering, settings with tabs, view modes, Sun and Moon search.

@@ -105,7 +105,7 @@ export function rebuildFrame(center) {
     if (st === act) {                   // rotation handle above the top edge
       const hnd = label('⟳', 'rothandle'); hnd.element.style.color = st.color; hnd.element.title = 'Drag to rotate the camera';
       hnd.position.copy(eqVec(...L.sky(0, L.H / 2 + Math.max(L.H * 0.08, 0.002)), R * 0.99));
-      hnd.element.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); startDrag(e, 'rotate'); });
+      hnd.element.addEventListener('pointerdown', (e) => { if ($('framing').hidden) return; e.stopPropagation(); e.preventDefault(); startDrag(e, 'rotate'); });
       frameGroup.add(hnd);
     }
   }
@@ -127,7 +127,9 @@ export function updateFrame() {
 }
 
 export function hitFrame(e) {
-  if (!frameGeom) return false;
+  // the frame can be grabbed only while the Framing panel is open – otherwise a press in the middle of the sky
+  // (where the frame follows the view) would move the frame instead of panning
+  if (!frameGeom || $('framing').hidden) return false;
   const [ra, dec] = pointerRaDec(e), [xi, eta] = toPlane(frameGeom.ra, frameGeom.dec, ra, dec);
   const u = xi * frameGeom.right[0] + eta * frameGeom.right[1], v = xi * frameGeom.up[0] + eta * frameGeom.up[1];
   return Math.abs(u) <= frameGeom.W / 2 && Math.abs(v) <= frameGeom.H / 2;

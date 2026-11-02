@@ -198,7 +198,16 @@ main{flex:1;min-height:0;height:auto}
 #setDlg .objBody fieldset{flex-direction:column;align-items:flex-start}
 .note{background:transparent;border:1px dashed var(--warn);color:var(--warn);font-size:12px}
 /* inverted colours: white sky, black stars; hue-rotate keeps the object-type colours recognisable */
-#sky.inverted canvas, #sky.inverted #labelLayer{filter:invert(1) hue-rotate(180deg)}
+/* only the WebGL canvas is filtered (cheap on the GPU); filtering the label layer re-rasterised hundreds of
+   labels every frame and made panning stutter – labels get inverted colours directly instead */
+#sky.inverted canvas{filter:invert(1) hue-rotate(180deg)}
+#sky.inverted .lbl{color:#3a5a8c;text-shadow:0 0 3px #fff,0 0 3px #fff}
+#sky.inverted .lbl:hover{color:#000}
+#sky.inverted .slbl{color:#5a4a20;text-shadow:0 0 3px #fff,0 0 3px #fff}
+#sky.inverted .plbl,#sky.inverted .sm{color:#6a4a00;text-shadow:0 0 3px #fff,0 0 3px #fff}
+#sky.inverted .glbl{color:#7a8aa8}
+#sky.inverted .card{color:#7a5a10;text-shadow:0 0 3px #fff}
+#sky.inverted .frlbl,#sky.inverted .pnum{text-shadow:0 0 3px #fff,0 0 3px #fff}
 .sm{cursor:pointer;pointer-events:auto}
 #list tr.body td{background:color-mix(in srgb, var(--accent2) 8%, transparent)}
 /* the sky is a drawing surface: dragging must never select label text */

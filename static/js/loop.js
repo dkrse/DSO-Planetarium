@@ -17,7 +17,14 @@ export let last = performance.now(), lastTableUpd = 0;
 let dirty = true;
 export const invalidate = () => { dirty = true; };
 // optional profiling: window.__dso.prof = {} collects the time spent in each part of a frame
-const P = (name, t0) => { const p = window.__dso?.prof; if (p) p[name] = (p[name] ?? 0) + performance.now() - t0; return performance.now(); };
+// each frame's parts are timed; frames slower than 40 ms are kept in window.__dso.slow (last 50) for diagnosis
+let parts = {};
+const P = (name, t0) => {
+  const now = performance.now(), dt = now - t0;
+  parts[name] = dt;
+  const p = window.__dso?.prof; if (p) p[name] = (p[name] ?? 0) + dt;
+  return now;
+};
 export function frame(now) {
   requestAnimationFrame(frame);
   const elapsed = now - last;
@@ -107,6 +114,13 @@ export function frame(now) {
   renderer.render(scene, camera); t = P('webgl', t);
   labelR.render(scene, camera); t = P('labels', t);
   if (window.__dso?.prof) window.__dso.prof.frames = (window.__dso.prof.frames ?? 0) + 1;
+  const total = Object.values(parts).reduce((x, y) => x + y, 0);
+  if (total > 40 && window.__dso) {
+    const slow = (window.__dso.slow ??= []);
+    slow.push({ at: Math.round(now), total: +total.toFixed(1), ...Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, +v.toFixed(1)])) });
+    if (slow.length > 50) slow.shift();
+  }
+  parts = {};
 }
 
 // ---------------------------------------------------------------- label decluttering
