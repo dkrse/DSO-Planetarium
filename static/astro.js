@@ -30,7 +30,7 @@ export function moonEcl(j) {
   const d = j - 2451545, L = 218.316 + 13.176396 * d;
   const M = (134.963 + 13.064993 * d) * D2R, F = (93.272 + 13.22935 * d) * D2R;
   const D = (297.85 + 12.190749 * d) * D2R, Ms = (357.529 + 0.98560028 * d) * D2R;
-  const lon = L + 6.289 * Math.sin(M) - 1.274 * Math.sin(2 * D - M) + 0.658 * Math.sin(2 * D)
+  const lon = L + 6.289 * Math.sin(M) + 1.274 * Math.sin(2 * D - M) + 0.658 * Math.sin(2 * D)
     + 0.214 * Math.sin(2 * M) - 0.186 * Math.sin(Ms) - 0.114 * Math.sin(2 * F);
   const lat = 5.128 * Math.sin(F) + 0.28 * Math.sin(M + F) + 0.277 * Math.sin(M - F) + 0.173 * Math.sin(2 * D - F);
   return [mod(lon, 360), lat];
@@ -39,6 +39,24 @@ export const moonRaDec = (j) => { const [l, b] = moonEcl(j); return eclToEq(l, b
 export function moonIllum(j) {
   const [l, b] = moonEcl(j), [s] = sunEcl(j);
   return (1 - Math.cos(b * D2R) * Math.cos((l - s) * D2R)) / 2;
+}
+
+// IAU 1976 precession matrix J2000 → mean equator of date (row-major 3×3)
+export function precessionMatrix(j) {
+  const T = (j - 2451545) / 36525, a = D2R / 3600;
+  const zeta = (2306.2181 * T + 0.30188 * T * T + 0.017998 * T ** 3) * a;
+  const z = (2306.2181 * T + 1.09468 * T * T + 0.018203 * T ** 3) * a;
+  const th = (2004.3109 * T - 0.42665 * T * T - 0.041833 * T ** 3) * a;
+  const cz = Math.cos(zeta), sz = Math.sin(zeta), cZ = Math.cos(z), sZ = Math.sin(z), ct = Math.cos(th), st = Math.sin(th);
+  return [[cZ * ct * cz - sZ * sz, -cZ * ct * sz - sZ * cz, -cZ * st],
+    [sZ * ct * cz + cZ * sz, -sZ * ct * sz + cZ * cz, -sZ * st],
+    [st * cz, -st * sz, ct]];
+}
+/** J2000 → of date (inverse: of date → J2000), degrees */
+export function precess(ra, dec, j, inverse = false) {
+  const P = precessionMatrix(j), v = [Math.cos(dec * D2R) * Math.cos(ra * D2R), Math.cos(dec * D2R) * Math.sin(ra * D2R), Math.sin(dec * D2R)];
+  const w = [0, 1, 2].map((i) => inverse ? P[0][i] * v[0] + P[1][i] * v[1] + P[2][i] * v[2] : P[i][0] * v[0] + P[i][1] * v[1] + P[i][2] * v[2]);
+  return [mod(Math.atan2(w[1], w[0]) / D2R, 360), Math.asin(Math.max(-1, Math.min(1, w[2]))) / D2R];
 }
 
 // sensor field of view (degrees)

@@ -1,11 +1,19 @@
-"""Deep-sky catalog (Messier + popular NGC/IC/Sh2 astrophotography targets).
+"""Deep-sky catalog.
 
-Each entry: (id, name, type, RA [h], Dec [deg], mag, major axis ['], minor axis ['], PA [deg])
-Types: G galaxy, GC globular cluster, OC open cluster, EN emission nebula,
-RN reflection nebula, PN planetary nebula, SNR supernova remnant, DN dark nebula,
-AST asterism / star cloud. Coordinates J2000, sizes approximate.
+Main source: app/data/catalog.json, built from OpenNGC (CC-BY-SA-4.0) by tools/build_catalog.py.
+The hand-made list below is used only as a fallback for objects that OpenNGC does not contain or
+lists differently (Sharpless / LDN objects, duplicates such as IC 2118, M102 = NGC 5866, …).
+
+Fallback entry: (id, name, type, RA [h], Dec [deg], mag, major axis ['], minor axis ['], PA [deg])
+Types: G galaxy, GC globular cluster, OC open cluster, EN emission nebula, RN reflection nebula,
+PN planetary nebula, SNR supernova remnant, DN dark nebula, AST asterism / star cloud. J2000.
 """
+import json
+from pathlib import Path
 
+DATA = Path(__file__).resolve().parent / "data" / "catalog.json"
+
+# fallback list (only entries missing from catalog.json are used)
 _RAW = [
     ("M1", "Crab Nebula", "SNR", 5.5756, 22.014, 8.4, 7, 5, 55),
     ("M2", "", "GC", 21.5576, -0.823, 6.5, 16, 16, 0),
@@ -171,9 +179,14 @@ _RAW = [
 
 
 def _build():
-    return [{"id": oid, "name": name, "type": typ, "ra": ra_h * 15.0, "dec": dec, "mag": mag,
-             "maj": maj, "min": mn, "pa": pa}
-            for oid, name, typ, ra_h, dec, mag, maj, mn, pa in _RAW]
+    main = json.loads(DATA.read_text(encoding="utf-8"))["objects"] if DATA.exists() else []
+    for o in main:
+        o["src"] = "OpenNGC"
+    have = {o["id"] for o in main}
+    extra = [{"id": oid, "name": name, "type": typ, "ra": ra_h * 15.0, "dec": dec, "mag": mag,
+              "maj": maj, "min": mn, "pa": pa, "src": "manual"}
+             for oid, name, typ, ra_h, dec, mag, maj, mn, pa in _RAW if oid not in have]
+    return main + extra
 
 
 CATALOG = _build()

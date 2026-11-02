@@ -53,7 +53,7 @@ def moon_ecl(j):
     F = (93.272 + 13.229350 * d) * D2R
     D = (297.850 + 12.190749 * d) * D2R
     Ms = (357.529 + 0.98560028 * d) * D2R
-    lon = (L + 6.289 * math.sin(M) - 1.274 * math.sin(2 * D - M) + 0.658 * math.sin(2 * D)
+    lon = (L + 6.289 * math.sin(M) + 1.274 * math.sin(2 * D - M) + 0.658 * math.sin(2 * D)
            + 0.214 * math.sin(2 * M) - 0.186 * math.sin(Ms) - 0.114 * math.sin(2 * F))
     lat = (5.128 * math.sin(F) + 0.280 * math.sin(M + F) + 0.277 * math.sin(M - F)
            + 0.173 * math.sin(2 * D - F))
@@ -85,6 +85,49 @@ def separation(ra1, dec1, ra2, dec2):
     return math.degrees(math.acos(max(-1.0, min(1.0, a))))
 
 
+def precession_matrix(j: float):
+    """IAU 1976 precession matrix J2000 → mean equator of date (row-major 3×3)."""
+    T = (j - 2451545.0) / 36525.0
+    a = 1 / 3600 * D2R
+    zeta = (2306.2181 * T + 0.30188 * T * T + 0.017998 * T ** 3) * a
+    z = (2306.2181 * T + 1.09468 * T * T + 0.018203 * T ** 3) * a
+    th = (2004.3109 * T - 0.42665 * T * T - 0.041833 * T ** 3) * a
+    cz, sz, cZ, sZ, ct, st = math.cos(zeta), math.sin(zeta), math.cos(z), math.sin(z), math.cos(th), math.sin(th)
+    return [[cZ * ct * cz - sZ * sz, -cZ * ct * sz - sZ * cz, -cZ * st],
+            [sZ * ct * cz + cZ * sz, -sZ * ct * sz + cZ * cz, -sZ * st],
+            [st * cz, -st * sz, ct]]
+
+
+def precess(ra: float, dec: float, j: float, inverse: bool = False):
+    """J2000 → of date (inverse=True: of date → J2000). Degrees in, degrees out."""
+    P = precession_matrix(j)
+    v = (math.cos(dec * D2R) * math.cos(ra * D2R), math.cos(dec * D2R) * math.sin(ra * D2R), math.sin(dec * D2R))
+    if inverse:
+        w = [sum(P[k][i] * v[k] for k in range(3)) for i in range(3)]
+    else:
+        w = [sum(P[i][k] * v[k] for k in range(3)) for i in range(3)]
+    return math.degrees(math.atan2(w[1], w[0])) % 360.0, math.degrees(math.asin(max(-1.0, min(1.0, w[2]))))
+
+
+def horizon_alt(az: float, points) -> float:
+    """Altitude of a custom horizon profile at azimuth az (linear interpolation, wraps at 360°).
+    points: [[az, alt], ...]; empty → flat horizon (0°)."""
+    if not points:
+        return 0.0
+    pts = sorted((p[0] % 360.0, p[1]) for p in points)
+    az %= 360.0
+    prev = (pts[-1][0] - 360.0, pts[-1][1])
+    for a, h in pts + [(pts[0][0] + 360.0, pts[0][1])]:
+        if az <= a:
+            return prev[1] + (h - prev[1]) * ((az - prev[0]) / (a - prev[0]) if a != prev[0] else 0)
+        prev = (a, h)
+    return pts[-1][1]
+
+
+# standard altitude of a star / DSO at rise and set (centre at the horizon + 34′ refraction)
+H0_STAR = -0.5667
+
+
 def iso(dt):
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None
 
@@ -109,8 +152,8 @@ def _first(cr, kind):
 class Night:
     """Precomputed time grid for one night (24 h from window start)."""
 
-    def __init__(self, start: datetime, lat: float, lon: float, step_min: int = 5):
-        self.start, self.lat, self.lon = start, lat, lon
+    def __init__(self, start: datetime, lat: float, lon: float, step_min: int = 5, horizon=None):
+        self.start, self.lat, self.lon, self.horizon = start, lat, lon, horizon or []
         n = 24 * 60 // step_min + 1
         self.step_h = step_min / 60
         self.times = [start + timedelta(minutes=step_min * i) for i in range(n)]
@@ -142,10 +185,15 @@ class Night:
         return ev
 
     def visibility(self, obj, min_alt=30.0, twilight=-18.0):
-        ra, dec, lat = obj["ra"], obj["dec"], self.lat
-        alts = [altaz(ra, dec, lat, l)[0] for l in self.lsts]
-        cr = _crossings(self.times, alts, 0.0)
-        cr_lim = _crossings(self.times, alts, min_alt)
+        # catalog is J2000 → precess to the mean equator of this night
+        ra, dec = precess(obj["ra"], obj["dec"], self.jds[len(self.jds) // 2])
+        lat = self.lat
+        aa = [altaz(ra, dec, lat, l) for l in self.lsts]
+        alts = [a for a, _ in aa]
+        cr = _crossings(self.times, alts, H0_STAR)
+        # usable = above the minimum altitude AND above the local horizon profile
+        margin = [a - max(min_alt, horizon_alt(z, self.horizon)) for a, z in aa]
+        cr_lim = _crossings(self.times, margin, 0.0)
 
         # transit, analytically
         dt_days = ((ra - self.lsts[0]) % 360.0) / SID
@@ -153,10 +201,10 @@ class Night:
         max_alt = 90.0 - abs(lat - dec)
 
         good = [(self.times[i], a) for i, a in enumerate(alts)
-                if a >= min_alt and self.sun_alt[i] <= twilight]
+                if margin[i] >= 0 and self.sun_alt[i] <= twilight]
         hours = len(good) * self.step_h
-        moon_dark = [self.moon_alt[i] < 0 for i, a in enumerate(alts)
-                     if a >= min_alt and self.sun_alt[i] <= twilight]
+        moon_dark = [self.moon_alt[i] < 0 for i in range(len(alts))
+                     if margin[i] >= 0 and self.sun_alt[i] <= twilight]
 
         mid_j = self.jds[len(self.jds) // 2]
         mra, mdec = moon_radec(mid_j)
