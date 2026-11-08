@@ -1,0 +1,7 @@
+services:
+  dso-planetarium:
+    build: .
+    container_name: dso-planetarium
+    ports:
+      - "5210:5210"
+    restart: unless-stopped

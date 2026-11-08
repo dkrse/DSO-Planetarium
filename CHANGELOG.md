@@ -3,17 +3,42 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] – 2026-11-08
 
-### Added
-- Slow-frame log: frames taking more than 40 ms are recorded with a per-part breakdown in `window.__dso.slow`.
+Complete rewrite as a precise planetarium. The framing / equipment / mosaic / targets features, catalog management,
+DSS images and the Three.js renderer were removed; they can be rebuilt on top of the new core later.
+
+### Changed
+- One data source per kind: Hipparcos (stars), OpenNGC (all NGC / IC / Messier + addendum, 13 372 objects),
+  Stellarium "modern" (constellation lines by HIP number, IAU boundaries), JPL DE440 (planets).
+  Sharpless, Barnard, the hand-picked extras and the d3-celestial star / line files are gone.
+- New 2D canvas renderer with an exact stereographic projection; deep-sky outlines are computed on the sphere from
+  size and position angle; objects without a catalogued PA are drawn as a dashed circle instead of a guessed ellipse.
+- Constellation lines are great circles between Hipparcos stars of the same catalogue (no separate coordinates).
+- Astronomy: proper motion to the date, annual aberration, nutation, apparent sidereal time, refraction,
+  topocentric Sun / Moon / planets, Moon from Meeus ch. 47, planets from Keplerian elements + DE440 residuals.
+  Tested against astropy with DE440: stars < 5″, Sun and planets ≈ 3″, Moon ≈ 13″.
+- The right side panel (search, details, display, location) can be shown / hidden (☰ Panel, key P).
+- The server only serves static files; settings are kept in the browser.
 
 ### Fixed
-- Pressing the mouse in the middle of the sky grabbed the camera frame (which follows the view there) instead of
-  panning; the frame can now be dragged / rotated only while the ▭ Framing panel is open.
-- Panning stuttered with inverted colours (95th-percentile frame 37 ms instead of 20 ms): the CSS filter was also
-  applied to the label layer, so hundreds of labels were re-rasterised every frame. Only the WebGL canvas is filtered
-  now; labels get inverted colours directly.
+- Labels, the selection marker and clickable objects below the horizon showed through the ground; the ground was
+  also slightly translucent. The ground is now opaque and everything below it is hidden in the Alt/Az view.
+- The J2000 grid, the constellation boundaries and the cursor RA/Dec now include annual aberration like the objects
+  (up to 20″ offset before).
+- Refraction was ~4 % too large above 15°; it now follows the ERFA model (< 0.5″ from astropy).
+- Deep-sky colours were hard to read on the inverted (white) chart.
+
+### Performance
+- Proper motion and aberration of the 118 k stars are updated in place, without temporary arrays.
+- Deep-sky outlines are cached for at most 1 500 objects (LRU) instead of growing without limit.
+- Moving the mouse only updates the coordinate readout; the object details are rebuilt only when time or place
+  change (at most 4× per second), not while panning or zooming.
+
+### Added
+- Tests: ground/horizon hiding, opaque ground, side panel, search and on-screen size, view-mode switch, speed and
+  memory (headless Chromium); Sun rise / transit / set, refraction and proper motion against astropy.
+- New screenshots in the README.
 
 ## [0.3.0] – 2026-11-02
 
