@@ -22,7 +22,7 @@ Object.assign(sky.opt, saved.opt || {});
 if (saved.view) Object.assign(P, saved.view);
 if (saved.lat != null) { sky.lat = saved.lat; sky.lon = saved.lon; }
 if (saved.panelHidden) document.body.classList.add('panel-hidden');
-P.update();
+P.update(); sky.computeFrame();   // transforms exist before the first animation frame (pointer events may come earlier)
 $('#loading').remove();
 
 let lastInfo = 0, infoTime = 0, infoLoc = '';

@@ -22,6 +22,7 @@ DSS images and the Three.js renderer were removed; they can be rebuilt on top of
 - The server only serves static files; settings are kept in the browser.
 
 ### Fixed
+- Error "Cannot read properties of undefined" when the pointer moved over the sky before the first frame was drawn (e.g. while opening a second window); the error banner now also shows where an error happened.
 - Labels, the selection marker and clickable objects below the horizon showed through the ground; the ground was
   also slightly translucent. The ground is now opaque and everything below it is hidden in the Alt/Az view.
 - The J2000 grid, the constellation boundaries and the cursor RA/Dec now include annual aberration like the objects

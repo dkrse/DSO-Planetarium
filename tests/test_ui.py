@@ -103,3 +103,15 @@ def test_speed_and_memory(app_page):
     })()""")
     assert r["ms"] < 60, r
     assert r["grow"] < 5, r
+
+
+def test_pointer_before_first_frame(browser, server):
+    """A pointer move right after loading (before the first animation frame) must not throw (regression)."""
+    pg = browser.new_page(); errors = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.add_init_script("""new MutationObserver((_, o) => { if (document.getElementById('sky') && !document.getElementById('loading')) {
+        o.disconnect(); document.getElementById('sky').dispatchEvent(new PointerEvent('pointermove', {clientX: 300, clientY: 300})); }
+      }).observe(document, {childList: true, subtree: true});""")
+    pg.goto(server + "/"); pg.wait_for_function("window.__dso"); pg.wait_for_timeout(300)
+    pg.close()
+    assert not errors, errors
